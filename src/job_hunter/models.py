@@ -80,6 +80,10 @@ class Profile(BaseModel):
     # Free-text extra wishes from the user (the `description` param):
     description: str | None = None
 
+    # Whether we've collected job-search preferences that aren't on a resume
+    # (salary expectation, locations, remote). Asked once, at first search.
+    search_prefs_collected: bool = False
+
     # Ask-once persistent memory. Anything not on the resume that an application
     # asked for (10th/12th marks, CGPA, notice period, ...) is remembered here,
     # keyed by a normalized question, and reused across every future session.

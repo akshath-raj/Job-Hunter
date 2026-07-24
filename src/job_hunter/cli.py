@@ -52,26 +52,27 @@ def onboard(
     console.print(f"[green]Target roles:[/] {', '.join(prof.target_roles) or '—'}")
     console.print(f"[green]Seniority:[/] {sen} | ceiling: {ceiling}")
 
-    missing = profile_mod.missing_required_fields(prof, include_recommended=True)
+    # Only ask for REQUIRED details the resume didn't contain — no standard
+    # questionnaire. Everything else (marks, CGPA, ...) is extracted from the
+    # resume, and anything still unknown is asked later only if an application
+    # actually needs it.
+    missing = profile_mod.missing_required_fields(prof, include_recommended=False)
     answers = {}
-    for field, question in missing.items():
-        val = typer.prompt(question, default="")
-        if val:
-            answers[field] = val
-    if answers:
-        prof = profile_mod.apply_answers(prof, answers)
-
-    # Ask-once extras (10th/12th marks, CGPA, notice period...) — stored forever.
-    extra_missing = profile_mod.missing_extra_fields(prof)
-    if extra_missing:
-        console.print("[dim]A few details applications often ask for "
-                      "(press Enter to skip any):[/]")
-        for _key, question in extra_missing.items():
+    if missing:
+        console.print("[dim]A few required details weren't found on your resume:[/]")
+        for field, question in missing.items():
             val = typer.prompt(question, default="")
             if val:
-                profile_mod.remember(prof, question, val)
+                answers[field] = val
+        prof = profile_mod.apply_answers(prof, answers)
     profile_mod.save(prof)
-    console.print("[green]Profile saved.[/] Run [bold]job-hunter search[/] next.")
+
+    if prof.extra:
+        preview = ", ".join(list(prof.extra.keys())[:4])
+        console.print(f"[green]Pulled {len(prof.extra)} extra detail(s) from your resume[/] "
+                      f"[dim]({preview}…)[/]")
+    console.print("[green]Profile saved.[/] I'll ask for anything else only if a specific "
+                  "application needs it. Run [bold]job-hunter search[/] next.")
 
 
 @app.command()
@@ -88,6 +89,20 @@ def search(
 ):
     """Search LinkedIn for jobs matching your profile and store them."""
     p = profile_mod.load()
+
+    # One-time: collect preferences that aren't on a resume (salary, location...).
+    if profile_mod.needs_search_preferences(p):
+        console.print("[dim]A couple of preferences for this search "
+                      "(asked once, press Enter to skip):[/]")
+        salary = typer.prompt(profile_mod.SEARCH_PREF_QUESTIONS["expected salary"], default="")
+        locations = typer.prompt(profile_mod.SEARCH_PREF_QUESTIONS["preferred locations"], default="")
+        remote = typer.confirm("Only remote roles?", default=False)
+        profile_mod.set_search_preferences(
+            p, expected_salary=salary or None,
+            locations=locations or None, remote_only=remote,
+        )
+        profile_mod.save(p)
+
     console.print("[cyan]Searching LinkedIn...[/]")
     res = _run(service.search_jobs(p, queries=query or None, max_per_query=max))
     console.print_json(data=res)

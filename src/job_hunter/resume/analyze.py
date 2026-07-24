@@ -39,13 +39,21 @@ ANALYSIS_INSTRUCTIONS = """Return a JSON object with exactly these keys:
   "inferred_phone": string|null,
   "inferred_location": string|null,
   "inferred_linkedin_url": string|null,
-  "inferred_github_url": string|null
+  "inferred_github_url": string|null,
+
+  // Extract EVERY concrete fact an application might reuse and that IS present in
+  // the resume. Use clear, self-describing keys. Omit anything not in the resume
+  // (do NOT guess). Examples of keys to use when present:
+  //   "10th grade percentage", "12th grade percentage", "undergraduate cgpa",
+  //   "degree", "major", "university", "graduation year", "current employer",
+  //   "current title", "certifications", "languages", "date of birth", "gender".
+  "extracted_details": { string: string }
 }"""
 
 
 def build_prompt(resume_text: str, description: str | None) -> str:
     desc = f"\n\nCandidate's own notes about what they want:\n{description}" if description else ""
-    return f"RESUME:\n{resume_text[:12000]}{desc}\n\n{ANALYSIS_INSTRUCTIONS}"
+    return f"RESUME:\n{resume_text[:20000]}{desc}\n\n{ANALYSIS_INSTRUCTIONS}"
 
 
 def analyze(resume_text: str, description: str | None = None) -> dict[str, Any]:
@@ -96,5 +104,15 @@ def apply_analysis(profile: Profile, data: dict[str, Any]) -> Profile:
     ]:
         if getattr(ident, field) in (None, "") and data.get(key):
             setattr(ident, field, data[key])
+
+    # Everything else the resume contained (10th/12th marks, CGPA, degree, ...)
+    # goes into the ask-once memory so applications reuse it and we never ask.
+    from .. import profile as profile_mod
+
+    details = data.get("extracted_details") or {}
+    if isinstance(details, dict):
+        for key, value in details.items():
+            if isinstance(value, (str, int, float)) and str(value).strip():
+                profile_mod.remember(profile, str(key), str(value))
 
     return profile

@@ -132,6 +132,36 @@ async def login_linkedin() -> dict[str, Any]:
 
 
 @mcp.tool()
+def search_preferences_needed() -> dict[str, Any]:
+    """Whether to ask the user salary/location/remote prefs before searching.
+
+    Returns {needed: bool, questions: {...}}. If needed, ask the user these
+    (they aren't on a resume), then call set_search_preferences.
+    """
+    prof = profile_mod.load()
+    return {
+        "needed": profile_mod.needs_search_preferences(prof),
+        "questions": profile_mod.SEARCH_PREF_QUESTIONS,
+    }
+
+
+@mcp.tool()
+def set_search_preferences(
+    expected_salary: str = "",
+    locations: list[str] | None = None,
+    remote_only: bool = False,
+) -> dict[str, Any]:
+    """Save one-time search prefs (salary expectation, locations, remote). Asked once."""
+    prof = profile_mod.set_search_preferences(
+        profile_mod.load(), expected_salary=expected_salary or None,
+        locations=locations, remote_only=remote_only,
+    )
+    profile_mod.save(prof)
+    return {"saved": True, "constraints": prof.constraints.model_dump(),
+            "expected_salary": prof.extra.get("expected salary")}
+
+
+@mcp.tool()
 async def search_jobs(queries: list[str] | None = None, max_per_query: int = 25) -> dict[str, Any]:
     """Search LinkedIn for jobs matching the profile; stores new ones, tags eligibility."""
     return await service.search_jobs(

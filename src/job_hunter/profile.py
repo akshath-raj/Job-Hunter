@@ -153,3 +153,37 @@ def apply_extra(profile: Profile, answers: dict[str, str]) -> Profile:
     for question, answer in answers.items():
         remember(profile, question, answer)
     return profile
+
+
+# ---- one-time job-search preferences (not derivable from a resume) --------
+
+SEARCH_PREF_QUESTIONS = {
+    "expected salary": "What's your expected salary / compensation? (e.g. '20 LPA', or blank)",
+    "preferred locations": "Preferred job locations, comma-separated? (or blank for any)",
+    "remote only": "Only remote roles? (y/N)",
+}
+
+
+def needs_search_preferences(profile: Profile) -> bool:
+    return not profile.search_prefs_collected
+
+
+def set_search_preferences(
+    profile: Profile,
+    expected_salary: str | None = None,
+    locations: str | list[str] | None = None,
+    remote_only: bool | None = None,
+) -> Profile:
+    """Apply search-time preferences and mark them collected (so we ask once)."""
+    if expected_salary:
+        remember(profile, "expected salary", expected_salary)
+    if locations:
+        locs = locations if isinstance(locations, list) else [
+            x.strip() for x in locations.split(",") if x.strip()
+        ]
+        if locs:
+            profile.constraints.locations = locs
+    if remote_only is not None:
+        profile.constraints.remote_only = remote_only
+    profile.search_prefs_collected = True
+    return profile
