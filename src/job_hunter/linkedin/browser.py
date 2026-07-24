@@ -104,8 +104,23 @@ class Session:
             if self._pw:
                 await self._pw.stop()
 
+    async def has_auth_cookie(self) -> bool:
+        """Passive login check — inspects the `li_at` auth cookie, no navigation.
+
+        Safe to call while the user is typing on the login page (navigating there
+        would interrupt them and cause a reload loop).
+        """
+        cookies = await self.context.cookies("https://www.linkedin.com")
+        return any(c.get("name") == "li_at" and c.get("value") for c in cookies)
+
     async def is_logged_in(self) -> bool:
-        """True if the LinkedIn session is authenticated."""
+        """True if the LinkedIn session is authenticated.
+
+        Prefers the passive cookie check; only navigates to /feed to confirm when
+        no cookie is present (used to gate search/apply, not during login polling).
+        """
+        if await self.has_auth_cookie():
+            return True
         await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
         await human_pause()
         return "/feed" in self.page.url and "login" not in self.page.url
@@ -122,18 +137,23 @@ async def session(headless: bool = False) -> AsyncIterator[Session]:
 
 
 async def ensure_login(headless: bool = False, timeout_s: int = 300) -> bool:
-    """Open LinkedIn; if not logged in, wait (non-headless) for the user to sign in."""
+    """Open LinkedIn; if not logged in, wait (non-headless) for the user to sign in.
+
+    Polls the auth cookie WITHOUT navigating, so the user's login/2FA flow is
+    never interrupted (navigating mid-login caused an endless reload loop).
+    """
     async with session(headless=headless) as s:
-        if await s.is_logged_in():
+        if await s.has_auth_cookie():
             return True
         if headless:
             return False
-        # Send the user to the login page and poll until authenticated.
-        await s.page.goto("https://www.linkedin.com/login")
+        # Land on the login page ONCE, then wait passively for the cookie.
+        await s.page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded")
         waited = 0
         while waited < timeout_s:
             await asyncio.sleep(3)
             waited += 3
-            if "/feed" in s.page.url or await s.is_logged_in():
+            if await s.has_auth_cookie():
+                await human_pause(0.5, 1.0)  # let the session settle
                 return True
         return False
