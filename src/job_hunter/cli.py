@@ -94,8 +94,9 @@ def search(
     if profile_mod.needs_search_preferences(p):
         console.print("[dim]A couple of preferences for this search "
                       "(asked once, press Enter to skip):[/]")
-        salary = typer.prompt(profile_mod.SEARCH_PREF_QUESTIONS["expected salary"], default="")
-        locations = typer.prompt(profile_mod.SEARCH_PREF_QUESTIONS["preferred locations"], default="")
+        q = profile_mod.SEARCH_PREF_QUESTIONS
+        salary = typer.prompt(q["expected salary"], default="")
+        locations = typer.prompt(q["preferred locations"], default="")
         remote = typer.confirm("Only remote roles?", default=False)
         profile_mod.set_search_preferences(
             p, expected_salary=salary or None,
