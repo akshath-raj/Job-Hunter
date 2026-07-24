@@ -106,8 +106,14 @@ async def search_jobs(
     enrich: bool = True,
     concurrency: int = 3,
     export: bool = True,
+    easy_apply_only: bool = False,
 ) -> dict:
     """Search LinkedIn, store new jobs, tag eligibility, enrich, and write Excel.
+
+    Search is BROAD by default — it includes jobs with external/company-site
+    applications, not just LinkedIn Easy Apply. Each job's real apply type is
+    detected while scraping; the apply engine figures out how to submit each one.
+    Set easy_apply_only=True to restrict to one-click Easy Apply.
 
     Enrichment (company/salary/qualifications) runs in parallel tabs on the same
     session — salary is web-searched when the posting omits it. `search` is the
@@ -124,15 +130,19 @@ async def search_jobs(
     location = c.locations[0] if c.locations else profile.identity.location
     new_jobs: list[Job] = []
     total = 0
+
+    async def _scrape(session, query):
+        return await search.scrape_search(
+            session, query, location=location, easy_apply=easy_apply_only,
+            remote=c.remote_only, max_results=max_per_query,
+        )
+
     async with browser.session(headless=headless) as s:
         if not await s.is_logged_in():
             return {"error": "Not logged into LinkedIn. Run `job-hunter login` first."}
         for q in queries:
             try:
-                jobs = await search.scrape_search(
-                    s, q, location=location, easy_apply=True,
-                    remote=c.remote_only, max_results=max_per_query,
-                )
+                jobs = await _scrape(s, q)
             except browser.SessionExpired:
                 # Session died mid-search. Wait for the user to re-login, then
                 # retry this query once. Everything found so far is already saved.
@@ -141,10 +151,7 @@ async def search_jobs(
                             "message": "LinkedIn logged you out / showed a security check "
                                        "mid-search. Log back in and re-run — saved jobs are "
                                        "kept and it resumes.", **store.counts_by_status()}
-                jobs = await search.scrape_search(
-                    s, q, location=location, easy_apply=True,
-                    remote=c.remote_only, max_results=max_per_query,
-                )
+                jobs = await _scrape(s, q)
             for job in jobs:
                 if fetch_details:
                     try:

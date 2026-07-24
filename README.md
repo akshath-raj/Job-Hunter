@@ -73,6 +73,9 @@ It runs two ways from one codebase:
 - **Two apply modes** — fully autonomous, or human-in-the-loop (you pick from the list).
 - **Ask-once memory** — anything not on your résumé is asked once and remembered
   forever, then reused to auto-answer applications.
+- **Broad search** — finds *all* matching jobs, not just LinkedIn Easy Apply;
+  external-application jobs are included and handled at apply time
+  (`--easy-only` to restrict).
 - **Handles the hassle** — LinkedIn Easy Apply, external career sites, Google
   Forms, and account signup (reads verification codes from Gmail).
 - **Resilient** — detects mid-run session expiry / security checks and resumes;

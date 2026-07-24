@@ -95,8 +95,11 @@ def brief():
 def search(
     query: list[str] = typer.Option(None, "--query", "-q", help="Override search terms."),
     max: int = typer.Option(25, "--max", "-m", help="Max results per query."),
+    easy_only: bool = typer.Option(
+        False, "--easy-only", help="Restrict to LinkedIn Easy Apply (default: all jobs)."
+    ),
 ):
-    """Search LinkedIn for jobs matching your profile and store them."""
+    """Search LinkedIn (broad — includes external-application jobs) and store them."""
     p = profile_mod.load()
 
     # One-time: collect preferences that aren't on a resume, then LLM-process
@@ -120,7 +123,9 @@ def search(
         console.print(f"[green]Searching for:[/] {', '.join(p.search_keywords) or '—'}")
 
     console.print("[cyan]Searching LinkedIn + researching salaries (parallel)...[/]")
-    res = _run(service.search_jobs(p, queries=query or None, max_per_query=max))
+    res = _run(service.search_jobs(
+        p, queries=query or None, max_per_query=max, easy_apply_only=easy_only,
+    ))
     console.print_json(data=res)
     if res.get("excel"):
         console.print(f"[green]📊 Spreadsheet written:[/] {res['excel']}")
