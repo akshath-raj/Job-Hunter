@@ -50,6 +50,8 @@ def onboard(
     sen = prof.seniority.value if prof.seniority else "—"
     ceiling = prof.constraints.max_seniority.value if prof.constraints.max_seniority else "—"
     console.print(f"[green]Target roles:[/] {', '.join(prof.target_roles) or '—'}")
+    console.print(f"[green]Search keywords:[/] {', '.join(prof.search_keywords) or '—'}")
+    console.print(f"[green]Domains:[/] {', '.join(prof.domains) or '—'}")
     console.print(f"[green]Seniority:[/] {sen} | ceiling: {ceiling}")
 
     # Only ask for REQUIRED details the resume didn't contain — no standard
@@ -80,6 +82,13 @@ def profile():
     """Show the current profile."""
     p = profile_mod.load()
     console.print_json(p.model_dump_json(indent=2))
+
+
+@app.command()
+def brief():
+    """Show the detailed candidate brief the search agent uses."""
+    text = service.candidate_brief()
+    console.print(text or "[yellow]No brief yet — run `job-hunter onboard` first.[/]")
 
 
 @app.command()

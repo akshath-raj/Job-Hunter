@@ -35,10 +35,19 @@ def _home() -> Path:
 HOME: Path = _home()
 PROFILE_PATH: Path = HOME / "profile.json"
 RESUME_TEXT_PATH: Path = HOME / "resume.txt"
+BRIEF_PATH: Path = HOME / "candidate_brief.md"   # detailed profile for the search agent
 DB_PATH: Path = HOME / "jobs.db"
 BROWSER_PROFILE_DIR: Path = HOME / "chrome-profile"
 LOG_DIR: Path = HOME / "logs"
 ARTIFACTS_DIR: Path = HOME / "artifacts"  # screenshots of submitted apps
+
+
+def min_relevance() -> float:
+    """Jobs scoring below this (0-1) against the profile are dropped as off-target."""
+    try:
+        return float(os.environ.get("JOBHUNTER_MIN_RELEVANCE", "0.22"))
+    except ValueError:
+        return 0.22
 
 
 def ensure_dirs() -> None:

@@ -72,6 +72,9 @@ class Profile(BaseModel):
 
     # Derived from resume by the role-analyzer agent:
     target_roles: list[str] = Field(default_factory=list)   # e.g. ["Backend Engineer"]
+    search_keywords: list[str] = Field(default_factory=list)  # exact LinkedIn queries to run
+    domains: list[str] = Field(default_factory=list)          # e.g. ["Computer Vision", "NLP"]
+    core_competencies: list[str] = Field(default_factory=list)  # for relevance scoring
     seniority: Seniority | None = None
     skills: list[str] = Field(default_factory=list)
     years_experience: float | None = None
@@ -92,8 +95,17 @@ class Profile(BaseModel):
     updated_at: str = Field(default_factory=_now)
 
     def search_queries(self) -> list[str]:
-        """Reasonable LinkedIn search strings derived from target roles."""
-        return self.target_roles or (["software engineer"] if not self.summary else [])
+        """Precise LinkedIn search strings — keywords first, then target roles."""
+        return self.search_keywords or self.target_roles or (
+            ["software engineer"] if not self.summary else []
+        )
+
+    def relevance_terms(self) -> list[str]:
+        """Terms that define what's on-target for this candidate (for scoring)."""
+        return [
+            *self.target_roles, *self.search_keywords, *self.domains,
+            *self.core_competencies, *self.skills,
+        ]
 
 
 class JobStatus(StrEnum):

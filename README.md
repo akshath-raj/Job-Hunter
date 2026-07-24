@@ -137,8 +137,15 @@ LinkedIn (your session) ─▶ search/scrape ─▶ jobs.db ─▶ application e
                                                              └─ external site (+ signup via Gmail codes)
 ```
 
-- **Role analyzer** turns your resume into target roles, seniority, and skills —
-  and *infers hard rules* (a current student is capped at entry-level).
+- **Role analyzer** reads your resume closely and writes a detailed
+  `candidate_brief.md` (domain, what you've built, technologies, level) plus
+  precise **search keywords** — so the search agent looks for *your*
+  specialization, not "software engineer" in general. View it with
+  `job-hunter brief`.
+- **Relevance filter** scores every scraped job against your profile and drops
+  off-target results (the reason shows as *"low relevance to your profile"*).
+  Tune the cutoff with `JOBHUNTER_MIN_RELEVANCE` (default `0.22`).
+- It also *infers hard rules* (a current student is capped at entry-level).
 - **Constraints engine** is the safety gate: every job must satisfy **all** your
   rules or it's skipped. Nothing that fails it is ever submitted.
 - **Application engine** answers questions from your profile first (free, exact),
@@ -160,6 +167,7 @@ standalone runs.
 | `JOBHUNTER_MODEL` | Override the default model |
 | `GMAIL_ADDRESS` / `GMAIL_APP_PASSWORD` | Auto-read signup verification codes ([App Password](https://myaccount.google.com/apppasswords), never your real password) |
 | `JOBHUNTER_HOME` | Where local state lives (default `~/.jobhunter`) |
+| `JOBHUNTER_MIN_RELEVANCE` | Relevance cutoff 0-1 for dropping off-target jobs (default `0.22`) |
 
 **Provider selection:** if you set both keys, Anthropic wins unless
 `JOBHUNTER_PROVIDER=openai`. Default models: `claude-sonnet-4-6` /

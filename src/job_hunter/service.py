@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 
-from . import constraints, store
+from . import constraints, relevance, store
 from . import profile as profile_mod
 from .apply.engine import apply_to_job
 from .linkedin import browser, search
@@ -55,6 +55,13 @@ def set_analysis(data: dict) -> Profile:
     prof = analyze.apply_analysis(profile_mod.load(), data)
     profile_mod.save(prof)
     return prof
+
+
+def candidate_brief() -> str:
+    """The detailed markdown brief the search agent uses, if it exists."""
+    from . import config
+
+    return config.BRIEF_PATH.read_text() if config.BRIEF_PATH.exists() else ""
 
 
 # ---- search ---------------------------------------------------------------
@@ -114,6 +121,7 @@ async def search_jobs(
                     except Exception:  # noqa: BLE001
                         pass
                 constraints.annotate(job, profile)
+                relevance.annotate(job, profile)   # drop off-target jobs
                 if store.upsert_job(job):
                     new_jobs.append(job)
                 total += 1
