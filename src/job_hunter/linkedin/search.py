@@ -12,7 +12,7 @@ import re
 from urllib.parse import urlencode
 
 from ..models import Job
-from .browser import Session, human_pause
+from .browser import Session, SessionExpired, human_pause
 
 _JOBS_URL = "https://www.linkedin.com/jobs/search/"
 
@@ -71,10 +71,14 @@ async def scrape_search(
     url = build_url(keywords, location, easy_apply, remote, date_posted_days)
     await s.page.goto(url, wait_until="domcontentloaded")
     await human_pause(1.5, 3.0)
+    if await s.on_auth_wall():
+        raise SessionExpired("LinkedIn session invalidated during search.")
 
     jobs: dict[str, Job] = {}
     stale_scrolls = 0
     while len(jobs) < max_results and stale_scrolls < 4:
+        if await s.on_auth_wall():
+            raise SessionExpired("LinkedIn session invalidated during search.")
         cards = await s.page.query_selector_all(
             "div.job-card-container, li.jobs-search-results__list-item, "
             "li.scaffold-layout__list-item"

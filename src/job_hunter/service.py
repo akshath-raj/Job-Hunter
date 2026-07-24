@@ -90,10 +90,23 @@ async def search_jobs(
         if not await s.is_logged_in():
             return {"error": "Not logged into LinkedIn. Run `job-hunter login` first."}
         for q in queries:
-            jobs = await search.scrape_search(
-                s, q, location=location, easy_apply=True,
-                remote=c.remote_only, max_results=max_per_query,
-            )
+            try:
+                jobs = await search.scrape_search(
+                    s, q, location=location, easy_apply=True,
+                    remote=c.remote_only, max_results=max_per_query,
+                )
+            except browser.SessionExpired:
+                # Session died mid-search. Wait for the user to re-login, then
+                # retry this query once. Everything found so far is already saved.
+                if not await s.await_reauth():
+                    return {"error": "linkedin_session_expired", "new": len(new_jobs),
+                            "message": "LinkedIn logged you out / showed a security check "
+                                       "mid-search. Log back in and re-run — saved jobs are "
+                                       "kept and it resumes.", **store.counts_by_status()}
+                jobs = await search.scrape_search(
+                    s, q, location=location, easy_apply=True,
+                    remote=c.remote_only, max_results=max_per_query,
+                )
             for job in jobs:
                 if fetch_details:
                     try:
@@ -175,14 +188,38 @@ async def apply_batch(
     if not jobs:
         return {"applied": 0, "message": "No matching pending jobs. Search (and select) first."}
 
-    results = {"applied": 0, "needs_input": 0, "skipped": 0, "failed": 0, "details": []}
+    results = {"applied": 0, "needs_input": 0, "skipped": 0, "failed": 0,
+               "session_expired": 0, "details": []}
     sem = asyncio.Semaphore(max(1, concurrency))
+    reauth_lock = asyncio.Lock()   # only one worker drives the re-login prompt
+    aborted = {"flag": False}
 
     async with browser.session(headless=headless) as s:
         if not await s.is_logged_in():
             return {"error": "Not logged into LinkedIn. Run `job-hunter login` first."}
 
+        async def ensure_session() -> bool:
+            """True if authenticated (recovering via re-login once if needed)."""
+            if not await s.on_auth_wall():
+                return True
+            async with reauth_lock:
+                if not await s.on_auth_wall():   # another worker already fixed it
+                    return True
+                return await s.await_reauth()
+
         async def worker(job: Job) -> None:
+            if aborted["flag"]:
+                return
+            # Guard BEFORE touching a real application — never fill a login page.
+            if not await ensure_session():
+                aborted["flag"] = True
+                results["session_expired"] += 1
+                results["details"].append({
+                    "job_id": job.id, "job": f"{job.title} @ {job.company}",
+                    "status": "needs_input",
+                    "prompt": "LinkedIn session expired mid-run; re-login and re-run to resume.",
+                })
+                return
             async with sem:
                 page = await s.context.new_page()
                 try:
@@ -199,6 +236,9 @@ async def apply_batch(
             })
 
         await asyncio.gather(*(worker(j) for j in jobs))
+    if aborted["flag"]:
+        results["message"] = ("Stopped early: LinkedIn logged you out / showed a security "
+                              "check. Applied jobs are saved; re-run after logging in to resume.")
     return results
 
 

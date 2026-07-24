@@ -32,6 +32,13 @@ _UA = (
     "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 )
 
+# URL fragments that mean "you're no longer authenticated on this page".
+_AUTH_WALL_MARKERS = ("/login", "/checkpoint", "/authwall", "/uas/login", "/signup")
+
+
+class SessionExpired(RuntimeError):
+    """Raised mid-run when LinkedIn bounces us to a login/checkpoint wall."""
+
 
 async def human_pause(lo: float = 0.6, hi: float = 1.8) -> None:
     await asyncio.sleep(random.uniform(lo, hi))
@@ -124,6 +131,36 @@ class Session:
         await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
         await human_pause()
         return "/feed" in self.page.url and "login" not in self.page.url
+
+    async def on_auth_wall(self, page=None) -> bool:
+        """True if a page got bounced to a login / security-checkpoint wall, or the
+        auth cookie has vanished mid-run (session expired / challenged elsewhere)."""
+        page = page or self.page
+        url = (page.url or "").lower()
+        if any(m in url for m in _AUTH_WALL_MARKERS):
+            return True
+        return not await self.has_auth_cookie()
+
+    async def await_reauth(self, timeout_s: int = 180) -> bool:
+        """Session died mid-run: wait (non-headless) for the user to re-sign-in.
+
+        Sends the visible window to the login page and polls the cookie passively.
+        Returns False immediately in headless mode (nobody can solve it).
+        """
+        if self.headless:
+            return False
+        try:
+            await self.page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded")
+        except Exception:  # noqa: BLE001
+            pass
+        waited = 0
+        while waited < timeout_s:
+            await asyncio.sleep(3)
+            waited += 3
+            if await self.has_auth_cookie():
+                await human_pause(0.5, 1.0)
+                return True
+        return False
 
 
 @asynccontextmanager
