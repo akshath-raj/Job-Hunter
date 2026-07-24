@@ -24,8 +24,26 @@ def test_variations_bounded_by_keyword_cap():
     p = Profile()
     p.search_keywords = [f"kw{i}" for i in range(20)]
     p.constraints.locations = ["Bengaluru"]
-    tasks = _search_tasks(p, p.search_keywords, recent_days=None)
-    assert len({t["kw"] for t in tasks}) <= 6              # keyword cap applied
+    tasks = _search_tasks(p, p.search_keywords, recent_days=None, keyword_cap=3)
+    assert len({t["kw"] for t in tasks}) == 3              # keyword cap applied
+
+
+def test_tiers_scale_up():
+    from job_hunter.service import SEARCH_TIERS
+    less, medium, mx = SEARCH_TIERS["less"], SEARCH_TIERS["medium"], SEARCH_TIERS["max"]
+    assert less["target"] < medium["target"] < mx["target"]
+    assert less["per_query"] < medium["per_query"] < mx["per_query"]
+    assert less["keyword_cap"] <= medium["keyword_cap"] <= mx["keyword_cap"]
+
+
+def test_less_tier_skips_recent_pass():
+    p = Profile()
+    p.search_keywords = ["ML Engineer"]
+    p.constraints.locations = ["Bengaluru"]
+    tasks = _search_tasks(p, p.search_keywords, recent_days=None,
+                          keyword_cap=2, recent_pass=False, remote_pass=False)
+    assert not any(t["sort"] == "recent" for t in tasks)   # no newly-posted pass
+    assert not any(t["remote"] for t in tasks)             # no remote pass
 
 
 # ---- work-style parsing + acceptance --------------------------------------

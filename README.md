@@ -78,10 +78,10 @@ It runs two ways from one codebase:
 - **Two apply modes** — fully autonomous, or human-in-the-loop (you pick from the list).
 - **Ask-once memory** — anything not on your résumé is asked once and remembered
   forever, then reused to auto-answer applications.
-- **Broad search with variations** — searches every preferred location (not just
-  the first), a dedicated remote pass, and a newly-posted pass, to discover more
-  jobs. Includes external-application jobs, not just Easy Apply (`--easy-only` to
-  restrict). Accepts your work-style prefs (remote/hybrid/onsite).
+- **Tiered search (less / medium / max)** — pick how hard to look: a quick
+  handful, a decent set, or go all out. Each tier searches every preferred
+  location, a remote pass, and a newly-posted pass. Includes external-application
+  jobs, not just Easy Apply. Accepts your work-style prefs (remote/hybrid/onsite).
 - **Handles the hassle** — LinkedIn Easy Apply, external career sites, Google
   Forms, and account signup (reads verification codes from Gmail).
 - **Resilient** — detects mid-run session expiry / security checks and resumes;
@@ -181,10 +181,10 @@ job-hunter onboard -r ~/resume.pdf -d "remote backend roles, no crypto"
 # 3. (Optional) See how it understood you.
 job-hunter brief
 
-# 4. Search LinkedIn. Asks salary/location/preferences once (LLM-processed into
-#    a search strategy), researches salaries in parallel, filters off-target
-#    jobs, and writes ./jobs.xlsx.
-job-hunter search --max 20
+# 4. Search LinkedIn at an intensity tier (less | medium | max). Asks salary/
+#    location/preferences once (LLM-processed), researches salaries in parallel,
+#    and writes ./jobs.xlsx.
+job-hunter search --tier medium
 
 # 5. Review what it found and what it filtered out.
 job-hunter jobs --status eligible
@@ -197,10 +197,24 @@ job-hunter apply --limit 5
 job-hunter apply --mode select
 ```
 
+**Search tiers** — how hard to look:
+
+| Tier | Finds | Keywords | Scroll depth | Good for |
+|------|-------|----------|--------------|----------|
+| `less` | ~6 jobs | 2 | shallow | a quick look |
+| `medium` *(default)* | ~30 jobs | 5 | standard | most runs |
+| `max` | as many as possible | 8 | deep | going all out |
+
+```bash
+job-hunter search --tier less      # a few, fast
+job-hunter search --tier max       # everything it can find
+job-hunter search --target 50      # or set an exact job-count target
+```
+
 Or run the whole pipeline at once:
 
 ```bash
-job-hunter run -r ~/resume.pdf -d "new-grad ML roles, US only" --limit 5
+job-hunter run -r ~/resume.pdf -d "new-grad ML roles, US only" --tier medium --limit 5
 ```
 
 ### As an MCP server (Claude Code)
@@ -233,8 +247,8 @@ you have?"*.
 | `onboard -r <resume> [-d <notes>]` | Analyze résumé → profile + brief; ask only missing required fields. |
 | `brief` | Print the detailed candidate brief the search agent uses. |
 | `profile` | Show the full stored profile as JSON. |
-| `search [--max N] [-q <query>]` | Search LinkedIn (all jobs by relevance), research salaries, filter, write `jobs.xlsx`. |
-| `search --recent-days N` / `--headless` | Limit to recent postings / run without a visible browser. |
+| `search [--tier less\|medium\|max]` | Search at an intensity tier, research salaries, filter, write `jobs.xlsx`. |
+| `search --target N` / `--recent-days N` / `--headless` | Override job-count target / limit to recent postings / no visible browser. |
 | `jobs [--status <s>]` | List stored jobs (`eligible`, `ineligible`, `applied`, …). |
 | `enrich [--limit N]` | (Re)research company/salary/qualifications for stored jobs. |
 | `export [--status <s>] [--path <p>]` | Write jobs to an Excel spreadsheet. |

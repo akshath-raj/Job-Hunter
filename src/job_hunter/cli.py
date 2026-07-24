@@ -144,7 +144,11 @@ def doctor(check_login: bool = typer.Option(True, "--login/--no-login",
 @app.command()
 def search(
     query: list[str] = typer.Option(None, "--query", "-q", help="Override search terms."),
-    max: int = typer.Option(25, "--max", "-m", help="Max results per query."),
+    tier: str = typer.Option(
+        "medium", "--tier", "-t",
+        help="Search intensity: less (a few), medium (decent), max (go all out).",
+    ),
+    target: int = typer.Option(None, "--target", help="Override the tier's job-count target."),
     easy_only: bool = typer.Option(
         False, "--easy-only", help="Restrict to LinkedIn Easy Apply (default: all jobs)."
     ),
@@ -155,7 +159,10 @@ def search(
         False, "--headless", help="Run without showing the browser window."
     ),
 ):
-    """Search LinkedIn (broad — all jobs, by relevance) and store them."""
+    """Search LinkedIn at an intensity tier (less | medium | max) and store jobs."""
+    if tier not in service.SEARCH_TIERS:
+        console.print(f"[red]--tier must be one of {list(service.SEARCH_TIERS)}[/]")
+        raise typer.Exit(1)
     p = profile_mod.load()
 
     # One-time: collect preferences that aren't on a resume, then LLM-process
@@ -178,9 +185,10 @@ def search(
             console.print(f"[green]Search strategy:[/] {res['search_context']}")
         console.print(f"[green]Searching for:[/] {', '.join(p.search_keywords) or '—'}")
 
-    console.print("[cyan]Searching LinkedIn + researching salaries (parallel)...[/]")
+    console.print(f"[cyan]Searching LinkedIn ([bold]{tier}[/] tier) + researching "
+                  "salaries in parallel...[/]")
     res = _run(service.search_jobs(
-        p, queries=query or None, max_per_query=max, easy_apply_only=easy_only,
+        p, queries=query or None, tier=tier, target=target, easy_apply_only=easy_only,
         recent_days=recent_days, headless=headless,
     ))
     console.print_json(data=res)
@@ -308,12 +316,12 @@ def run(
     resume: str = typer.Option(..., "--resume", "-r"),
     description: str = typer.Option("", "--description", "-d"),
     limit: int = typer.Option(10, "--limit", "-n"),
-    max: int = typer.Option(25, "--max", "-m"),
+    tier: str = typer.Option("medium", "--tier", "-t", help="less | medium | max"),
     mode: str = typer.Option("auto", "--mode", help="'auto' or 'select'."),
 ):
     """Full pipeline: onboard -> search (+enrich +Excel) -> apply."""
     onboard(resume=resume, description=description)
-    search(query=None, max=max)   # also enriches and writes the spreadsheet
+    search(query=None, tier=tier)   # also enriches and writes the spreadsheet
     apply(limit=limit, job=None, mode=mode, concurrency=2, no_llm=False)
 
 

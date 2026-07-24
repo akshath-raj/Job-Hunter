@@ -170,14 +170,24 @@ def _append_prefs_to_brief(prof: Profile, raw: dict[str, str]) -> None:
 
 # ---- search ---------------------------------------------------------------
 
-def _search_tasks(profile: Profile, queries: list[str], recent_days: int | None) -> list[dict]:
-    """Build search variations to discover MORE jobs.
+# Three intensity tiers. Each controls how many jobs to find (target), how deep
+# to scroll each search (per_query), how many keywords to use, and which extra
+# variation passes to run. "less" = a quick handful; "max" = go all out.
+SEARCH_TIERS: dict[str, dict] = {
+    "less":   {"target": 6,   "per_query": 10,  "keyword_cap": 2,
+               "recent_pass": False, "remote_pass": True},
+    "medium": {"target": 30,  "per_query": 30,  "keyword_cap": 5,
+               "recent_pass": True,  "remote_pass": True},
+    "max":    {"target": 300, "per_query": 100, "keyword_cap": 8,
+               "recent_pass": True,  "remote_pass": True},
+}
 
-    For each keyword: one pass per preferred city (all-time, relevance), a remote
-    pass if remote is acceptable, and a 'newly posted' pass (last 7 days). This is
-    why a single search now covers Bengaluru AND Chennai AND remote, plus fresh
-    postings — not just the first location.
-    """
+
+def _search_tasks(profile: Profile, queries: list[str], recent_days: int | None,
+                  keyword_cap: int = 5, recent_pass: bool = True,
+                  remote_pass: bool = True) -> list[dict]:
+    """Build search variations to discover more jobs: a pass per preferred city,
+    an optional remote pass, and an optional newly-posted pass — per keyword."""
     c = profile.constraints
     locs = [loc_str for loc_str in c.locations if loc_str.strip()]
     if not locs and profile.identity.location:
@@ -191,15 +201,15 @@ def _search_tasks(profile: Profile, queries: list[str], recent_days: int | None)
     )
 
     tasks: list[dict] = []
-    for kw in queries[:6]:                       # cap keywords to bound total work
+    for kw in queries[:keyword_cap]:
         for loc_str in (city_locs or [None]):     # a pass per city (fixes single-city bug)
             tasks.append({"kw": kw, "location": loc_str, "remote": False,
                           "sort": "recent" if recent_days else "relevance",
                           "recent_days": recent_days})
-        if wants_remote:                          # dedicated remote pass (no city)
+        if remote_pass and wants_remote:          # dedicated remote pass (no city)
             tasks.append({"kw": kw, "location": None, "remote": True,
                           "sort": "relevance", "recent_days": recent_days})
-        if not recent_days:                       # newly-posted variation
+        if recent_pass and not recent_days:       # newly-posted variation
             tasks.append({"kw": kw, "location": city_locs[0] if city_locs else None,
                           "remote": False, "sort": "recent", "recent_days": 7})
     return tasks
@@ -208,7 +218,8 @@ def _search_tasks(profile: Profile, queries: list[str], recent_days: int | None)
 async def search_jobs(
     profile: Profile,
     queries: list[str] | None = None,
-    max_per_query: int = 25,
+    tier: str = "medium",
+    target: int | None = None,        # override the tier's job-count target
     fetch_details: bool = True,
     headless: bool = False,
     enrich: bool = True,
@@ -217,19 +228,19 @@ async def search_jobs(
     easy_apply_only: bool = False,
     recent_days: int | None = None,   # None = all postings, not just recent
 ) -> dict:
-    """Search LinkedIn, store new jobs, tag eligibility, enrich, and write Excel.
+    """Search LinkedIn at an intensity tier, store jobs, enrich, and write Excel.
 
-    Search is BROAD by default — it includes jobs with external/company-site
-    applications, not just LinkedIn Easy Apply. Each job's real apply type is
-    detected while scraping; the apply engine figures out how to submit each one.
-    Set easy_apply_only=True to restrict to one-click Easy Apply.
-
-    Enrichment (company/salary/qualifications) runs in parallel tabs on the same
-    session — salary is web-searched when the posting omits it. `search` is the
-    command that produces the spreadsheet.
+    tier: "less" (a quick handful) | "medium" (a decent set) | "max" (go all out).
+    Search is BROAD — includes external-application jobs, not just Easy Apply; the
+    apply engine figures out how to submit each. Enrichment (salary/culture, with
+    web research) runs in parallel and produces the spreadsheet.
     """
     from . import config
     from . import enrich as enrich_mod
+
+    cfg = SEARCH_TIERS.get(tier, SEARCH_TIERS["medium"])
+    target = target or cfg["target"]
+    max_per_query = cfg["per_query"]
 
     queries = queries or profile.search_queries()
     if not queries:
@@ -242,7 +253,11 @@ async def search_jobs(
     # plus those seen earlier in THIS run (a job can appear under many variations).
     seen_ids: set[str] = store.all_job_ids()
 
-    tasks = _search_tasks(profile, queries, recent_days)
+    tasks = _search_tasks(
+        profile, queries, recent_days,
+        keyword_cap=cfg["keyword_cap"], recent_pass=cfg["recent_pass"],
+        remote_pass=cfg["remote_pass"],
+    )
 
     async def _scrape(session, task):
         return await search.scrape_search(
@@ -251,7 +266,6 @@ async def search_jobs(
             date_posted_days=task["recent_days"], sort=task["sort"],
         )
 
-    target = max_per_query   # treat --max as a total target: keep going until we hit it
     async with browser.session(headless=headless) as s:
         if not await s.is_logged_in():
             return {"error": "Not logged into LinkedIn. Run `job-hunter login` first."}
@@ -318,8 +332,9 @@ async def search_jobs(
 
             await asyncio.gather(*(worker(j) for j in new_jobs))
 
-    result = {"queries": queries, "variations": len(tasks), "found": total,
-              "new": len(new_jobs), "skipped_already_seen": skipped_seen,
+    result = {"tier": tier, "target": target, "queries": queries,
+              "variations": len(tasks), "found": total, "new": len(new_jobs),
+              "skipped_already_seen": skipped_seen,
               "llm_enrichment": config.has_llm(), **store.counts_by_status()}
     if export:
         result["excel"] = export_excel()["path"]     # Phase 3: rewrite with details

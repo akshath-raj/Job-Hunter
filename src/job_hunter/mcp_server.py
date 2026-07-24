@@ -194,16 +194,17 @@ def set_search_preferences(
 
 
 @mcp.tool()
-async def search_jobs(queries: list[str] | None = None, max_per_query: int = 25,
-                      easy_apply_only: bool = False, recent_days: int | None = None,
-                      headless: bool = False) -> dict[str, Any]:
-    """Search LinkedIn (broad — all jobs by relevance, not just recent or Easy
-    Apply) matching the profile; stores new ones, tags eligibility, writes Excel.
-    Never re-visits a job already stored. Options: easy_apply_only (one-click
-    only), recent_days (limit to last N days; default all), headless (no window).
+async def search_jobs(queries: list[str] | None = None, tier: str = "medium",
+                      target: int | None = None, easy_apply_only: bool = False,
+                      recent_days: int | None = None, headless: bool = False) -> dict[str, Any]:
+    """Search LinkedIn at an intensity tier and store + enrich + export jobs.
+
+    tier: "less" (a few jobs), "medium" (a decent set), "max" (go all out).
+    Broad by default (external-apply jobs included, not just Easy Apply); never
+    re-visits a stored job. `target` overrides the tier's job-count target.
     """
     return await service.search_jobs(
-        profile_mod.load(), queries=queries, max_per_query=max_per_query,
+        profile_mod.load(), queries=queries, tier=tier, target=target,
         easy_apply_only=easy_apply_only, recent_days=recent_days, headless=headless,
     )
 
