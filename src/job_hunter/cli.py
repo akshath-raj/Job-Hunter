@@ -92,6 +92,56 @@ def brief():
 
 
 @app.command()
+def doctor(check_login: bool = typer.Option(True, "--login/--no-login",
+                                            help="Also verify LinkedIn login (opens browser).")):
+    """Diagnose setup and data health, with fixes for anything broken."""
+    d = service.diagnostics()
+
+    def mark(ok: bool) -> str:
+        return "[green]✓[/]" if ok else "[red]✗[/]"
+
+    console.print("[bold]Job Hunter — health check[/]\n")
+
+    llm = d["llm"]
+    console.print(f"{mark(llm['key_present'])} LLM: provider [cyan]{llm['provider']}[/] "
+                  f"model [cyan]{llm['model']}[/]"
+                  + ("" if llm["key_present"] else "  [red](no API key set!)[/]"))
+    if not llm["key_present"]:
+        console.print("   [dim]Fix: set OPENAI_API_KEY or ANTHROPIC_API_KEY in .env "
+                      "(salary/culture research needs it).[/]")
+    serp_hint = "" if d["web_research"] == "SerpAPI" else \
+        "  [dim](set SERPAPI_KEY for reliable salary/review data)[/]"
+    console.print(f"[cyan]•[/] Web research: [cyan]{d['web_research']}[/]{serp_hint}")
+    pw_hint = "" if d["playwright_installed"] else "  [dim](run: playwright install chromium)[/]"
+    console.print(f"{mark(d['playwright_installed'])} Playwright installed{pw_hint}")
+    gmail_state = "configured" if d["gmail_signup_codes"] else "not set (will pause for codes)"
+    console.print(f"[cyan]•[/] Gmail signup codes: {gmail_state}")
+
+    p = d["profile"]
+    console.print(f"\n{mark(p['exists'])} Profile "
+                  + ("" if p["exists"] else "[red](run: job-hunter onboard -r <resume>)[/]"))
+    if p["exists"]:
+        console.print(f"   roles: {', '.join(p['target_roles']) or '—'}")
+        console.print(f"   keywords: {', '.join(p['search_keywords']) or '—'}")
+        console.print(f"   locations: {', '.join(p['locations']) or 'any'} | "
+                      f"work styles: {', '.join(p['workplace_types']) or 'any'}")
+        console.print(f"   {mark(p['brief_exists'])} candidate brief")
+
+    j = d["jobs"]
+    console.print(f"\n[bold]Jobs:[/] {j['total']} stored | {j['enriched']} enriched | "
+                  f"{j['with_salary']} with salary | {j['applied']} applied")
+    console.print(f"   by status: {j['by_status']}")
+    if j["total"] and j["enriched"] < j["total"]:
+        console.print("   [dim]Tip: run `job-hunter enrich` to fill missing details.[/]")
+
+    if check_login:
+        console.print("\n[cyan]Checking LinkedIn login...[/]")
+        ok = _run(service.check_login(headless=True))
+        console.print(f"{mark(ok)} LinkedIn session"
+                      + ("" if ok else "  [red](run: job-hunter login)[/]"))
+
+
+@app.command()
 def search(
     query: list[str] = typer.Option(None, "--query", "-q", help="Override search terms."),
     max: int = typer.Option(25, "--max", "-m", help="Max results per query."),
@@ -227,11 +277,19 @@ def reset(
 
 
 @app.command()
-def enrich(limit: int = typer.Option(25, "--limit", "-n", help="Jobs to enrich.")):
-    """Research company/salary/qualifications for jobs (cheap research subagents)."""
-    console.print("[cyan]Enriching jobs (this may hit the web for salaries)...[/]")
-    res = _run(service.enrich_jobs(limit=limit))
+def enrich(
+    limit: int = typer.Option(50, "--limit", "-n", help="Jobs to enrich."),
+    force: bool = typer.Option(False, "--force", help="Re-enrich already-enriched jobs."),
+    headless: bool = typer.Option(False, "--headless", help="Run without a visible browser."),
+):
+    """Research salary/culture/pros-cons for stored jobs (web + LLM), then flag."""
+    console.print("[cyan]Enriching jobs — parallel web research for salary & reviews...[/]")
+    res = _run(service.enrich_jobs(limit=limit, force=force, headless=headless))
     console.print_json(data=res)
+    if res.get("excel"):
+        console.print(f"[green]📊 Spreadsheet updated:[/] {res['excel']}")
+    if res.get("llm_enrichment") is False:
+        console.print("[yellow]No LLM key set — salary/culture research is limited.[/]")
 
 
 @app.command()

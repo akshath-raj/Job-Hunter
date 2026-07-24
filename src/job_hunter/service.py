@@ -64,6 +64,59 @@ def candidate_brief() -> str:
     return config.BRIEF_PATH.read_text() if config.BRIEF_PATH.exists() else ""
 
 
+def diagnostics() -> dict:
+    """A health snapshot for `job-hunter doctor` — env, profile, and job stats."""
+    import os
+
+    from . import config
+    from .apply import gmail
+
+    prof = profile_mod.load()
+    jobs = store.list_jobs(limit=5000)
+    provider = config.llm_provider()
+
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: F401
+        playwright_ok = True
+    except Exception:  # noqa: BLE001
+        playwright_ok = False
+
+    return {
+        "home": str(config.HOME),
+        "llm": {
+            "provider": provider,
+            "model": config.model_for(provider),
+            "key_present": config.has_llm(),
+        },
+        "web_research": "SerpAPI" if os.environ.get("SERPAPI_KEY") else "browser scraping",
+        "gmail_signup_codes": gmail.configured(),
+        "playwright_installed": playwright_ok,
+        "profile": {
+            "exists": profile_mod.exists(),
+            "brief_exists": config.BRIEF_PATH.exists(),
+            "target_roles": prof.target_roles,
+            "search_keywords": prof.search_keywords,
+            "locations": prof.constraints.locations,
+            "workplace_types": prof.constraints.workplace_types,
+            "seniority_ceiling": (prof.constraints.max_seniority.value
+                                  if prof.constraints.max_seniority else None),
+        },
+        "jobs": {
+            "total": len(jobs),
+            "enriched": sum(1 for j in jobs if j.enriched),
+            "with_salary": sum(1 for j in jobs if j.salary),
+            "by_status": store.counts_by_status(),
+            "applied": len(store.list_applications(status=JobStatus.applied)),
+        },
+    }
+
+
+async def check_login(headless: bool = True) -> bool:
+    """Fast LinkedIn auth check (cookie only) for diagnostics."""
+    async with browser.session(headless=headless) as s:
+        return await s.has_auth_cookie()
+
+
 def process_search_preferences(raw: dict[str, str]) -> dict:
     """LLM-process raw search answers into a structured strategy and save it.
 
@@ -399,28 +452,41 @@ async def apply_single(profile: Profile, job_id: str, use_llm: bool = True,
 # ---- enrichment, export, memory -------------------------------------------
 
 async def enrich_jobs(job_ids: list[str] | None = None, limit: int = 25,
-                      concurrency: int = 3) -> dict:
-    """Enrich jobs (company/salary/qualifications) via research sub-agents."""
-    from . import enrich, fit
+                      concurrency: int = 3, headless: bool = False,
+                      export: bool = True, force: bool = False) -> dict:
+    """Enrich jobs with the full browser+web research (salary/culture/flags).
+
+    Same quality as search-time enrichment. By default fills jobs not yet
+    enriched; force=True re-enriches everything.
+    """
+    from . import config
+    from . import enrich as enrich_mod
 
     profile = profile_mod.load()
     if job_ids:
         jobs = [j for j in (store.get_job(i) for i in job_ids) if j]
     else:
-        jobs = [j for j in store.list_jobs() if not j.enriched][:limit]
+        jobs = [j for j in store.list_jobs(limit=2000) if force or not j.enriched][:limit]
     if not jobs:
         return {"enriched": 0, "message": "Nothing to enrich."}
 
+    use_llm = config.has_llm()
     sem = asyncio.Semaphore(max(1, concurrency))
 
     async def worker(job: Job) -> None:
         async with sem:
-            await enrich.enrich(job)
-        job.flags = fit.merge(fit.check(job, profile), None)   # cross-check requirements
+            await enrich_mod.enrich_with_browser(
+                s.context, job, profile=profile, use_llm=use_llm
+            )
         store.update_job(job)
 
-    await asyncio.gather(*(worker(j) for j in jobs))
-    return {"enriched": len(jobs)}
+    async with browser.session(headless=headless) as s:
+        await asyncio.gather(*(worker(j) for j in jobs))
+
+    result = {"enriched": len(jobs), "llm_enrichment": use_llm}
+    if export:
+        result["excel"] = export_excel()["path"]
+    return result
 
 
 def export_excel(status: JobStatus | None = None, path: str | None = None,

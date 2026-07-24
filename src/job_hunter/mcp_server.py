@@ -73,6 +73,13 @@ def get_candidate_brief() -> dict[str, Any]:
 
 
 @mcp.tool()
+def doctor() -> dict[str, Any]:
+    """Health snapshot: LLM/provider, web-research backend, profile, and job stats.
+    Use to diagnose why results/enrichment might be missing."""
+    return service.diagnostics()
+
+
+@mcp.tool()
 def missing_profile_fields() -> dict[str, str]:
     """Return {field: question} for required details still unknown. Ask the user these."""
     return profile_mod.missing_required_fields(profile_mod.load(), include_recommended=True)

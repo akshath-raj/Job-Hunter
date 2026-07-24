@@ -148,6 +148,7 @@ Edit `.env`. Only a provider key is required, and only for standalone runs
 | `OPENAI_API_KEY` | one provider | Use OpenAI as the standalone brain |
 | `JOBHUNTER_PROVIDER` | no | Force `anthropic` or `openai` (else: whichever key is set) |
 | `JOBHUNTER_MODEL` | no | Override the default model |
+| `SERPAPI_KEY` | no | Reliable Google results for salary/review research ([serpapi.com](https://serpapi.com/)); falls back to scraping if unset |
 | `GMAIL_ADDRESS` / `GMAIL_APP_PASSWORD` | no | Auto-read signup verification codes ([App Password](https://myaccount.google.com/apppasswords), never your real password) |
 | `JOBHUNTER_MIN_RELEVANCE` | no | Relevance cutoff `0-1` for dropping off-target jobs (default `0.22`) |
 | `JOBHUNTER_HOME` | no | Where local state lives (default `~/.jobhunter`) |
@@ -241,6 +242,7 @@ you have?"*.
 | `apply --mode select` | **Human-in-the-loop** — list jobs, you pick. |
 | `apply --job <id>` / `--concurrency N` | Apply to one job / apply several in parallel. |
 | `status` | Counts of jobs by status. |
+| `doctor` | Health check — LLM key, login, web-research backend, job/enrichment stats + fixes. |
 | `reset [--keep-login] [--only <scope>]` | Delete stored data about you (asks to confirm). |
 
 Run `job-hunter <command> --help` for all flags.

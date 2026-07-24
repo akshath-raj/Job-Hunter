@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from urllib.parse import quote_plus
 
@@ -102,8 +103,35 @@ _ENGINES = [
 ]
 
 
+async def _serpapi_snippets(query: str) -> str:
+    """Reliable Google results via SerpAPI (used when SERPAPI_KEY is set)."""
+    key = os.environ.get("SERPAPI_KEY")
+    if not key:
+        return ""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get("https://serpapi.com/search.json", params={
+                "q": query, "api_key": key, "engine": "google", "num": 10,
+            })
+            data = r.json()
+    except Exception:  # noqa: BLE001 — network/quota; fall back to scraping
+        return ""
+    parts: list[str] = []
+    box = data.get("answer_box") or {}
+    if box.get("snippet"):
+        parts.append(str(box["snippet"]))
+    for res in (data.get("organic_results") or [])[:10]:
+        parts.append(f"{res.get('title', '')} — {res.get('snippet', '')}".strip(" —"))
+    return "\n".join(p for p in parts if p.strip())
+
+
 async def _search_snippets(context, query: str) -> str:
-    """Fetch result snippets from a search engine, trying several for resilience."""
+    """Fetch result snippets — SerpAPI if configured, else scrape several engines."""
+    serp = await _serpapi_snippets(query)
+    if serp.strip():
+        return serp
     for url_tpl, selector in _ENGINES:
         page = await context.new_page()
         try:
