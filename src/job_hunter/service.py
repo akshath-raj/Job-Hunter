@@ -249,7 +249,9 @@ async def search_jobs(
 
             async def worker(job: Job) -> None:
                 async with sem:
-                    await enrich_mod.enrich_with_browser(s.context, job, use_llm=use_llm)
+                    await enrich_mod.enrich_with_browser(
+                        s.context, job, profile=profile, use_llm=use_llm
+                    )
                 store.update_job(job)
 
             await asyncio.gather(*(worker(j) for j in to_enrich))
@@ -390,8 +392,9 @@ async def apply_single(profile: Profile, job_id: str, use_llm: bool = True,
 async def enrich_jobs(job_ids: list[str] | None = None, limit: int = 25,
                       concurrency: int = 3) -> dict:
     """Enrich jobs (company/salary/qualifications) via research sub-agents."""
-    from . import enrich
+    from . import enrich, fit
 
+    profile = profile_mod.load()
     if job_ids:
         jobs = [j for j in (store.get_job(i) for i in job_ids) if j]
     else:
@@ -404,6 +407,7 @@ async def enrich_jobs(job_ids: list[str] | None = None, limit: int = 25,
     async def worker(job: Job) -> None:
         async with sem:
             await enrich.enrich(job)
+        job.flags = fit.merge(fit.check(job, profile), None)   # cross-check requirements
         store.update_job(job)
 
     await asyncio.gather(*(worker(j) for j in jobs))

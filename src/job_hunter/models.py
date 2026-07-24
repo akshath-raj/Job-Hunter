@@ -156,6 +156,7 @@ class Job(BaseModel):
     pros: str | None = None             # positives from reviews (Glassdoor/AmbitionBox…)
     cons: str | None = None             # negatives from reviews
     enrichment_source: str | None = None  # where the research came from
+    flags: str | None = None            # ⚠ mismatches vs the user's requirements
     enriched: bool = False
 
 

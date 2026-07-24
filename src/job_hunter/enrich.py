@@ -42,6 +42,9 @@ _INSTRUCTIONS = """Return ONLY a JSON object:
   "work_culture": string,    // 1-2 sentences on culture, from employee reviews
   "pros": string,            // top positives from reviews, "; "-separated
   "cons": string,            // top negatives from reviews, "; "-separated
+  "concerns": string,        // mismatches vs the candidate's REQUIREMENTS below
+                             // (e.g. salary below expectation, wrong location/style,
+                             // a deal-breaker) — or "" if it fits well
   "source": string           // where the info came from (sites/URLs or "job posting")
 }"""
 
@@ -159,9 +162,25 @@ def _deep_queries(job: Job) -> list[str]:
     ]
 
 
-async def enrich_with_browser(context, job: Job, use_llm: bool = True) -> Job:
-    """Deep enrichment: salary (with currency) + company culture/pros/cons, from
-    the posting and several web sources, synthesized by the LLM."""
+def _requirements_block(profile) -> str:
+    if profile is None:
+        return ""
+    from . import profile as profile_mod
+
+    c = profile.constraints
+    exp = profile_mod.recall(profile, "expected salary")
+    return (
+        "\nCANDIDATE REQUIREMENTS (flag mismatches in 'concerns'):\n"
+        f"- Expected salary: {exp or 'not specified'}\n"
+        f"- Locations: {', '.join(c.locations) or 'any'}\n"
+        f"- Work styles: {', '.join(c.workplace_types) or 'any'}\n"
+        f"- Deal-breakers: {', '.join(c.exclude_keywords) or 'none'}\n"
+    )
+
+
+async def enrich_with_browser(context, job: Job, profile=None, use_llm: bool = True) -> Job:
+    """Deep enrichment: salary (with currency) + company culture/pros/cons, plus a
+    cross-check of the job against the candidate's requirements (job.flags)."""
     posted_salary = salary_in_text(job.description)
 
     results = await asyncio.gather(
@@ -170,6 +189,7 @@ async def enrich_with_browser(context, job: Job, use_llm: bool = True) -> Job:
     )
     snippets = "\n".join(s for s in results if isinstance(s, str) and s.strip())
 
+    llm_concerns = None
     if use_llm:
         try:
             from . import llm
@@ -179,26 +199,34 @@ async def enrich_with_browser(context, job: Job, use_llm: bool = True) -> Job:
                 f"Location: {job.location or 'unknown'} "
                 f"(workplace: {job.workplace_type or 'n/a'})\n"
                 f"Salary in posting: {posted_salary or 'not stated'}\n"
-                f"Posting excerpt:\n{(job.description or '')[:1800]}\n\n"
+                f"Posting excerpt:\n{(job.description or '')[:1800]}\n"
+                f"{_requirements_block(profile)}\n"
                 f"Web search snippets (salary + reviews):\n{snippets[:4000]}\n\n"
                 f"{_INSTRUCTIONS}"
             )
             data = llm.complete_json(_DEEP_SYS, prompt, max_tokens=800)
             apply_enrichment(job, data)
+            llm_concerns = data.get("concerns")
             if not job.enrichment_source:
                 job.enrichment_source = "web research (salary + review sites)"
-            return job
         except Exception:  # noqa: BLE001 — fall back to non-LLM salary handling
             pass
 
-    # No-LLM fallback: at least fill salary from the posting or a regex web hit.
-    if posted_salary:
-        job.salary, job.enrichment_source = posted_salary, "job posting"
-    else:
-        hit = salary_in_text(snippets)
-        if hit:
-            job.salary, job.enrichment_source = f"est. {hit}", "web research"
-    job.enriched = True
+    if not job.enriched:
+        # No-LLM fallback: at least fill salary from the posting or a regex hit.
+        if posted_salary:
+            job.salary, job.enrichment_source = posted_salary, "job posting"
+        else:
+            hit = salary_in_text(snippets)
+            if hit:
+                job.salary, job.enrichment_source = f"est. {hit}", "web research"
+        job.enriched = True
+
+    # Cross-check against requirements (deterministic + LLM concerns).
+    if profile is not None:
+        from . import fit
+
+        job.flags = fit.merge(fit.check(job, profile), llm_concerns)
     return job
 
 

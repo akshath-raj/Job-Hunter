@@ -15,6 +15,7 @@ _COLUMNS = [
     ("posted_ago", "Posted", 12),
     ("num_applicants", "Applicants", 16),
     ("salary", "Salary (w/ currency)", 24),
+    ("flags", "⚠ Flags / concerns", 40),
     ("about", "About the company", 40),
     ("work_culture", "Work culture", 36),
     ("pros", "Pros (reviews)", 36),
@@ -40,6 +41,7 @@ def to_excel(jobs: list[Job], path: str | Path | None = None) -> str:
     # from there) so the spreadsheet is easy to find and open — not buried in
     # ~/.jobhunter with the internal state.
     out = Path(path) if path else Path.cwd() / "jobs.xlsx"
+    out.parent.mkdir(parents=True, exist_ok=True)
 
     wb = Workbook()
     ws = wb.active
@@ -55,6 +57,7 @@ def to_excel(jobs: list[Job], path: str | Path | None = None) -> str:
     ws.freeze_panes = "A2"
 
     wrap = Alignment(wrap_text=True, vertical="top")
+    flag_fill = PatternFill("solid", fgColor="FFF2CC")   # amber for the flags cell
     for row_idx, job in enumerate(jobs, start=2):
         for col_idx, (attr, _, _) in enumerate(_COLUMNS, start=1):
             value = getattr(job, attr, None)
@@ -63,6 +66,8 @@ def to_excel(jobs: list[Job], path: str | Path | None = None) -> str:
                 value = value[: _TRUNCATE[attr]] + "…"
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
             cell.alignment = wrap
+            if attr == "flags" and value:
+                cell.fill = flag_fill        # make concerns stand out
 
     wb.save(out)
     return str(out)
