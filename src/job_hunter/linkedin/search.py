@@ -145,4 +145,22 @@ async def fetch_details(s: Session, job: Job) -> Job:
     if wp:
         job.workplace_type = (await wp.inner_text()).strip()
 
+    # Posting age + applicant count live in the top-card description text; the
+    # exact selectors churn, so read the whole strip and regex it out.
+    top = await s.page.query_selector(
+        ".job-details-jobs-unified-top-card__primary-description-container, "
+        ".jobs-unified-top-card__primary-description, "
+        ".job-details-jobs-unified-top-card__tertiary-description-container"
+    )
+    if top:
+        text = " ".join((await top.inner_text()).split())
+        m = re.search(r"(\d+\s+(?:hour|day|week|month)s?\s+ago|just now|today|yesterday)",
+                      text, re.IGNORECASE)
+        if m:
+            job.posted_ago = m.group(1)
+        m = re.search(r"(over\s+)?(\d[\d,]*)\s+(?:applicants?|people clicked apply)",
+                      text, re.IGNORECASE)
+        if m:
+            job.num_applicants = m.group(0).strip()
+
     return job

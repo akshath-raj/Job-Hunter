@@ -31,23 +31,28 @@ SALARY_RE = re.compile(
     re.IGNORECASE,
 )
 
-_ABOUT_SYS = (
-    "You summarize a company and a job's key qualifications from the posting and "
-    "your own knowledge. Be factual and terse. Respond with ONLY the JSON asked for."
-)
-_ABOUT_INSTRUCTIONS = """Return ONLY: {"about": string, "qualifications": string}
-- about: 1-2 sentences on what the company does.
-- qualifications: the key required qualifications in one line."""
-
 _INSTRUCTIONS = """Return ONLY a JSON object:
 {
   "about": string,           // 1-2 sentences on what the company does
-  "salary": string,          // pay range; if NOT in the posting, search the web
-                             // (prefer Glassdoor / Levels.fyi) for the market
-                             // range for this role+company+location, prefix "est. "
+  "salary": string,          // pay range WITH currency/country, e.g. "₹18-24 LPA (INR)"
+                             // or "$120k-150k/yr (USD)". If NOT in the posting, research
+                             // it (Glassdoor/Levels.fyi/AmbitionBox) and prefix "est. ".
+                             // For REMOTE roles, state the currency explicitly.
   "qualifications": string,  // key required qualifications, one line
-  "source": string           // URL you got salary/about from, or "job posting"
+  "work_culture": string,    // 1-2 sentences on culture, from employee reviews
+  "pros": string,            // top positives from reviews, "; "-separated
+  "cons": string,            // top negatives from reviews, "; "-separated
+  "source": string           // where the info came from (sites/URLs or "job posting")
 }"""
+
+_DEEP_SYS = (
+    "You are a company & compensation research analyst. From a job posting plus web "
+    "search snippets (salary sites and employee-review sites like Glassdoor, "
+    "Levels.fyi, AmbitionBox, Indeed, Comparably), produce accurate, concise "
+    "details. ALWAYS state salary with its currency/country and make the currency "
+    "explicit for remote roles. Base culture/pros/cons on real employee reviews. "
+    "Respond with ONLY the JSON asked for."
+)
 
 
 def enrichment_prompt(job: Job) -> str:
@@ -55,8 +60,8 @@ def enrichment_prompt(job: Job) -> str:
         f"Job: {job.title} at {job.company}\n"
         f"Location: {job.location or 'unknown'}\n"
         f"Posting excerpt:\n{(job.description or '')[:2000]}\n\n"
-        f"If the posting has no salary, search Glassdoor/Levels.fyi/Google for the "
-        f"typical pay for this role at this company/location.\n\n{_INSTRUCTIONS}"
+        f"Research salary on Glassdoor/Levels.fyi/AmbitionBox and company culture / "
+        f"pros / cons from employee reviews across sites.\n\n{_INSTRUCTIONS}"
     )
 
 
@@ -64,6 +69,9 @@ def apply_enrichment(job: Job, data: dict) -> Job:
     job.about = data.get("about") or job.about
     job.salary = data.get("salary") or job.salary
     job.qualifications = data.get("qualifications") or job.qualifications
+    job.work_culture = data.get("work_culture") or job.work_culture
+    job.pros = data.get("pros") or job.pros
+    job.cons = data.get("cons") or job.cons
     job.enrichment_source = data.get("source") or job.enrichment_source
     job.enriched = True
     return job
@@ -140,32 +148,56 @@ async def research_salary(context, job: Job, use_llm: bool = True) -> tuple[str 
     return (f"est. {hit}", source) if hit else (None, None)
 
 
-async def enrich_with_browser(context, job: Job, use_llm: bool = True) -> Job:
-    """Standalone enrichment: salary (posting -> web) + about/qualifications (LLM)."""
-    if not job.salary:
-        posted = salary_in_text(job.description)
-        if posted:
-            job.salary, job.enrichment_source = posted, "job posting"
-        else:
-            salary, source = await research_salary(context, job, use_llm)
-            if salary:
-                job.salary, job.enrichment_source = salary, source
+def _deep_queries(job: Job) -> list[str]:
+    """A mini deep-research sweep across salary AND employee-review sources."""
+    loc = job.location or ""
+    return [
+        f"{job.title} {job.company} {loc} salary",
+        f"{job.company} salary glassdoor levels.fyi ambitionbox payscale",
+        f"{job.company} employee reviews work culture glassdoor ambitionbox indeed",
+        f"{job.company} pros and cons working comparably review",
+    ]
 
-    if use_llm and (not job.about or not job.qualifications):
+
+async def enrich_with_browser(context, job: Job, use_llm: bool = True) -> Job:
+    """Deep enrichment: salary (with currency) + company culture/pros/cons, from
+    the posting and several web sources, synthesized by the LLM."""
+    posted_salary = salary_in_text(job.description)
+
+    results = await asyncio.gather(
+        *(_search_snippets(context, q) for q in _deep_queries(job)),
+        return_exceptions=True,
+    )
+    snippets = "\n".join(s for s in results if isinstance(s, str) and s.strip())
+
+    if use_llm:
         try:
             from . import llm
 
-            data = llm.complete_json(
-                _ABOUT_SYS,
+            prompt = (
                 f"Job: {job.title} at {job.company}\n"
-                f"Posting:\n{(job.description or '')[:2000]}\n\n{_ABOUT_INSTRUCTIONS}",
-                max_tokens=300,
+                f"Location: {job.location or 'unknown'} "
+                f"(workplace: {job.workplace_type or 'n/a'})\n"
+                f"Salary in posting: {posted_salary or 'not stated'}\n"
+                f"Posting excerpt:\n{(job.description or '')[:1800]}\n\n"
+                f"Web search snippets (salary + reviews):\n{snippets[:4000]}\n\n"
+                f"{_INSTRUCTIONS}"
             )
-            job.about = job.about or data.get("about")
-            job.qualifications = job.qualifications or data.get("qualifications")
-        except Exception:  # noqa: BLE001
+            data = llm.complete_json(_DEEP_SYS, prompt, max_tokens=800)
+            apply_enrichment(job, data)
+            if not job.enrichment_source:
+                job.enrichment_source = "web research (salary + review sites)"
+            return job
+        except Exception:  # noqa: BLE001 — fall back to non-LLM salary handling
             pass
 
+    # No-LLM fallback: at least fill salary from the posting or a regex web hit.
+    if posted_salary:
+        job.salary, job.enrichment_source = posted_salary, "job posting"
+    else:
+        hit = salary_in_text(snippets)
+        if hit:
+            job.salary, job.enrichment_source = f"est. {hit}", "web research"
     job.enriched = True
     return job
 

@@ -17,11 +17,14 @@ def test_pick_model_is_cheap_first():
 def test_apply_enrichment_sets_fields(make_job):
     job = make_job("Backend Engineer")
     enrich.apply_enrichment(job, {
-        "about": "Makes widgets.", "salary": "$120k-$150k",
-        "qualifications": "3+ yrs Python", "source": "job posting",
+        "about": "Makes widgets.", "salary": "$120k-$150k/yr (USD)",
+        "qualifications": "3+ yrs Python", "work_culture": "Fast-paced, remote-friendly.",
+        "pros": "Good pay; flexible", "cons": "Long hours", "source": "Glassdoor",
     })
     assert job.enriched is True
-    assert job.salary == "$120k-$150k"
+    assert job.salary == "$120k-$150k/yr (USD)"
+    assert job.work_culture and "remote-friendly" in job.work_culture
+    assert job.pros and job.cons
 
 
 def test_enrichment_prompt_mentions_json(make_job):
@@ -29,13 +32,28 @@ def test_enrichment_prompt_mentions_json(make_job):
     assert "Acme" in prompt and "JSON" in prompt
 
 
-def test_to_excel_writes_rows(make_job, tmp_path):
+def test_to_excel_writes_rows_and_new_columns(make_job, tmp_path):
     jobs = [make_job("Backend Engineer"), make_job("Data Scientist", company="Beta")]
-    jobs[0].salary = "$120k"
+    jobs[0].salary = "₹18-24 LPA (INR)"
+    jobs[0].posted_ago = "2 weeks ago"
+    jobs[0].num_applicants = "47 applicants"
+    jobs[0].work_culture = "Collaborative"
     out = export.to_excel(jobs, tmp_path / "jobs.xlsx")
     wb = load_workbook(out)
     ws = wb.active
-    assert ws.cell(row=1, column=1).value == "ID"          # header
-    assert ws.max_row == 3                                   # header + 2 jobs
+    headers = [c.value for c in ws[1]]
+    for h in ["Posted", "Applicants", "Work culture", "Pros (reviews)",
+              "Cons (reviews)", "Job description"]:
+        assert h in headers
+    assert ws.max_row == 3
     values = [c.value for c in ws[2]]
-    assert "Backend Engineer" in values
+    assert "2 weeks ago" in values and "₹18-24 LPA (INR)" in values
+
+
+def test_description_is_truncated(make_job, tmp_path):
+    job = make_job("Engineer")
+    job.description = "x" * 2000
+    out = export.to_excel([job], tmp_path / "j.xlsx")
+    ws = load_workbook(out).active
+    desc_col = [c.value for c in ws[1]].index("Job description") + 1
+    assert len(ws.cell(row=2, column=desc_col).value) <= 801   # 800 + ellipsis

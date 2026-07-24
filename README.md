@@ -72,8 +72,9 @@ It runs two ways from one codebase:
 - **Relevance checking** — a keyword scorer *plus* an LLM cross-check vet every
   job against your résumé brief, so off-field roles (HR, content, sales) are
   dropped before they reach the spreadsheet.
-- **Spreadsheet** — every search writes a `jobs.xlsx` with company, salary,
-  qualifications, and link.
+- **Rich spreadsheet** — every search writes a `jobs.xlsx` with salary (currency
+  labelled), company culture, pros/cons from employee reviews, job description,
+  days since posted, applicant count, qualifications, and link.
 - **Two apply modes** — fully autonomous, or human-in-the-loop (you pick from the list).
 - **Ask-once memory** — anything not on your résumé is asked once and remembered
   forever, then reused to auto-answer applications.

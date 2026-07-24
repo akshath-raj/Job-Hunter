@@ -142,11 +142,18 @@ class Job(BaseModel):
     match_score: float | None = None    # 0-1, how well it fits the profile
     discovered_at: str = Field(default_factory=_now)
 
+    # Scraped from the posting:
+    posted_ago: str | None = None       # e.g. "2 weeks ago"
+    num_applicants: str | None = None   # e.g. "47 applicants" / "Over 200 applicants"
+
     # Enrichment (filled by a research agent / web search for the Excel export):
     about: str | None = None            # what the company does
-    salary: str | None = None           # listed or researched pay range
+    salary: str | None = None           # pay range WITH currency/country
     qualifications: str | None = None   # key required quals, summarized
-    enrichment_source: str | None = None  # where salary/about came from
+    work_culture: str | None = None     # summarized from employee reviews
+    pros: str | None = None             # positives from reviews (Glassdoor/AmbitionBox…)
+    cons: str | None = None             # negatives from reviews
+    enrichment_source: str | None = None  # where the research came from
     enriched: bool = False
 
 
