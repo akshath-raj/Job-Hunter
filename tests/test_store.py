@@ -33,6 +33,17 @@ def test_application_roundtrip():
     assert got.answers["Email"] == "a@b.com"
 
 
+def test_all_job_ids_and_exists(make_job):
+    a = make_job("A")
+    b = make_job("B")
+    store.upsert_job(a)
+    store.upsert_job(b)
+    ids = store.all_job_ids()
+    assert ids == {a.id, b.id}
+    assert store.job_exists(a.id) is True
+    assert store.job_exists("nope") is False
+
+
 def test_counts_by_status(make_job):
     a = make_job("A")
     a.status = JobStatus.eligible

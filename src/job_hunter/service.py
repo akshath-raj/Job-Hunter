@@ -150,6 +150,10 @@ async def search_jobs(
     location = c.locations[0] if c.locations else profile.identity.location
     new_jobs: list[Job] = []
     total = 0
+    skipped_seen = 0
+    # Track ids so we never re-visit a job: those already in the DB (prior runs)
+    # plus those seen earlier in THIS run (a job can appear under many queries).
+    seen_ids: set[str] = store.all_job_ids()
 
     async def _scrape(session, query):
         return await search.scrape_search(
@@ -173,6 +177,13 @@ async def search_jobs(
                                        "kept and it resumes.", **store.counts_by_status()}
                 jobs = await _scrape(s, q)
             for job in jobs:
+                total += 1
+                # Skip anything we've already handled — no repeat page visits,
+                # detail fetches, or enrichment for the same job id.
+                if job.id in seen_ids:
+                    skipped_seen += 1
+                    continue
+                seen_ids.add(job.id)
                 if fetch_details:
                     try:
                         job = await search.fetch_details(s, job)
@@ -182,7 +193,6 @@ async def search_jobs(
                 relevance.annotate(job, profile)   # drop off-target jobs (keyword scorer)
                 if store.upsert_job(job):
                     new_jobs.append(job)
-                total += 1
 
         # LLM cross-check: catch off-field jobs the keyword scorer missed
         # (the "checking agent" that vets what goes into the spreadsheet).
@@ -208,7 +218,7 @@ async def search_jobs(
             await asyncio.gather(*(worker(j) for j in to_enrich))
 
     result = {"queries": queries, "found": total, "new": len(new_jobs),
-              **store.counts_by_status()}
+              "skipped_already_seen": skipped_seen, **store.counts_by_status()}
     if export:
         result["excel"] = export_excel()["path"]
     return result

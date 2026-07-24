@@ -104,6 +104,17 @@ def counts_by_status() -> dict[str, int]:
         return {r["status"]: r["n"] for r in rows}
 
 
+def all_job_ids() -> set[str]:
+    """All known job ids — used to skip re-visiting jobs we've already seen."""
+    with _conn() as c:
+        return {r["id"] for r in c.execute("SELECT id FROM jobs").fetchall()}
+
+
+def job_exists(job_id: str) -> bool:
+    with _conn() as c:
+        return c.execute("SELECT 1 FROM jobs WHERE id=?", (job_id,)).fetchone() is not None
+
+
 # ---- applications ---------------------------------------------------------
 
 def save_application(app: Application) -> None:
