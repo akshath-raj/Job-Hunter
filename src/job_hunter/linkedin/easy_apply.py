@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
-from .browser import Session, human_pause
+from .browser import human_pause
 
 # answerer(question_label, options_or_None) -> answer string ("" to skip/leave blank)
 Answerer = Callable[[str, list[str] | None], Awaitable[str]]
@@ -129,8 +129,7 @@ async def _click(page, texts: list[str]):
     return None
 
 
-async def apply(s: Session, job_url: str, answerer: Answerer, max_steps: int = 12) -> ApplyResult:
-    page = s.page
+async def apply(page, job_url: str, answerer: Answerer, max_steps: int = 12) -> ApplyResult:
     result = ApplyResult()
 
     await page.goto(job_url, wait_until="domcontentloaded")

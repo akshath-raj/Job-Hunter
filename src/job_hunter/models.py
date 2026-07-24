@@ -80,6 +80,11 @@ class Profile(BaseModel):
     # Free-text extra wishes from the user (the `description` param):
     description: str | None = None
 
+    # Ask-once persistent memory. Anything not on the resume that an application
+    # asked for (10th/12th marks, CGPA, notice period, ...) is remembered here,
+    # keyed by a normalized question, and reused across every future session.
+    extra: dict[str, str] = Field(default_factory=dict)
+
     updated_at: str = Field(default_factory=_now)
 
     def search_queries(self) -> list[str]:
@@ -116,6 +121,13 @@ class Job(BaseModel):
     ineligible_reason: str | None = None
     match_score: float | None = None    # 0-1, how well it fits the profile
     discovered_at: str = Field(default_factory=_now)
+
+    # Enrichment (filled by a research agent / web search for the Excel export):
+    about: str | None = None            # what the company does
+    salary: str | None = None           # listed or researched pay range
+    qualifications: str | None = None   # key required quals, summarized
+    enrichment_source: str | None = None  # where salary/about came from
+    enriched: bool = False
 
 
 class Application(BaseModel):

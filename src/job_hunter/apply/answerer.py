@@ -36,6 +36,13 @@ class ProfileAnswerer:
         if det is not None:
             return det
 
+        # Ask-once memory: reuse anything the user answered in a past session.
+        from .. import profile as profile_mod
+
+        remembered = profile_mod.recall(self.profile, question)
+        if remembered is not None:
+            return remembered
+
         if self.use_llm:
             try:
                 return self._llm_answer(question, options)

@@ -60,7 +60,17 @@ def onboard(
             answers[field] = val
     if answers:
         prof = profile_mod.apply_answers(prof, answers)
-        profile_mod.save(prof)
+
+    # Ask-once extras (10th/12th marks, CGPA, notice period...) — stored forever.
+    extra_missing = profile_mod.missing_extra_fields(prof)
+    if extra_missing:
+        console.print("[dim]A few details applications often ask for "
+                      "(press Enter to skip any):[/]")
+        for _key, question in extra_missing.items():
+            val = typer.prompt(question, default="")
+            if val:
+                profile_mod.remember(prof, question, val)
+    profile_mod.save(prof)
     console.print("[green]Profile saved.[/] Run [bold]job-hunter search[/] next.")
 
 
@@ -97,17 +107,60 @@ def jobs(status: str = typer.Option(None, "--status", "-s", help="Filter by stat
 
 @app.command()
 def apply(
-    limit: int = typer.Option(10, "--limit", "-n", help="Max applications this run."),
+    limit: int = typer.Option(10, "--limit", "-n", help="Max applications (auto mode)."),
     job: str = typer.Option(None, "--job", "-j", help="Apply to one job id."),
+    mode: str = typer.Option("auto", "--mode", help="'auto' or 'select' (human-in-the-loop)."),
+    concurrency: int = typer.Option(2, "--concurrency", "-c", help="Parallel applications."),
     no_llm: bool = typer.Option(False, "--no-llm", help="Disable LLM answers (skip on unknowns)."),
 ):
-    """Autonomously apply to eligible jobs (fully autonomous submit)."""
+    """Apply to jobs — fully autonomous ('auto') or pick-your-own ('select')."""
     p = profile_mod.load()
     if job:
         res = _run(service.apply_single(p, job, use_llm=not no_llm))
-    else:
-        res = _run(service.apply_batch(p, limit=limit, use_llm=not no_llm))
+        console.print_json(data=res)
+        return
+
+    selected_ids = None
+    if mode == "select":
+        candidates = service.pending_eligible()
+        if not candidates:
+            console.print("[yellow]No eligible pending jobs. Run a search first.[/]")
+            return
+        table = Table("#", "title", "company", "salary")
+        for i, j in enumerate(candidates):
+            table.add_row(str(i), j.title[:40], j.company[:24], j.salary or "—")
+        console.print(table)
+        raw = typer.prompt("Enter the # of jobs to apply to (comma-separated, or 'all')")
+        if raw.strip().lower() == "all":
+            selected_ids = [j.id for j in candidates]
+        else:
+            picks = [int(x) for x in raw.replace(" ", "").split(",") if x.isdigit()]
+            selected_ids = [candidates[i].id for i in picks if 0 <= i < len(candidates)]
+
+    res = _run(service.apply_batch(
+        p, limit=limit, mode=mode, selected_ids=selected_ids,
+        use_llm=not no_llm, concurrency=concurrency,
+    ))
     console.print_json(data=res)
+
+
+@app.command()
+def enrich(limit: int = typer.Option(25, "--limit", "-n", help="Jobs to enrich.")):
+    """Research company/salary/qualifications for jobs (cheap research subagents)."""
+    console.print("[cyan]Enriching jobs (this may hit the web for salaries)...[/]")
+    res = _run(service.enrich_jobs(limit=limit))
+    console.print_json(data=res)
+
+
+@app.command()
+def export(
+    status: str = typer.Option(None, "--status", "-s", help="Filter by status."),
+    path: str = typer.Option(None, "--path", "-p", help="Output .xlsx path."),
+):
+    """Export jobs to an Excel spreadsheet."""
+    st = JobStatus(status) if status else None
+    res = service.export_excel(status=st, path=path)
+    console.print(f"[green]Wrote {res['rows']} jobs to[/] {res['path']}")
 
 
 @app.command()
@@ -116,11 +169,13 @@ def run(
     description: str = typer.Option("", "--description", "-d"),
     limit: int = typer.Option(10, "--limit", "-n"),
     max: int = typer.Option(25, "--max", "-m"),
+    mode: str = typer.Option("auto", "--mode", help="'auto' or 'select'."),
 ):
-    """Full pipeline: onboard -> search -> apply, autonomously."""
+    """Full pipeline: onboard -> search -> enrich -> apply."""
     onboard(resume=resume, description=description)
     search(query=None, max=max)
-    apply(limit=limit, job=None, no_llm=False)
+    enrich(limit=max)
+    apply(limit=limit, job=None, mode=mode, concurrency=2, no_llm=False)
 
 
 @app.command()

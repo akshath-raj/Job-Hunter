@@ -7,6 +7,8 @@ before any search begins.
 
 from __future__ import annotations
 
+import re
+
 from . import config
 from .models import Profile
 
@@ -75,4 +77,79 @@ def apply_answers(profile: Profile, answers: dict[str, str]) -> Profile:
     for field, value in answers.items():
         if value not in (None, ""):
             _set(profile, field, value)
+    return profile
+
+
+# ---- ask-once persistent memory (the `extra` store) -----------------------
+
+# Common things not usually on a resume that applications ask for. Proactively
+# collected during onboarding so we don't stall mid-application later.
+COMMON_EXTRA = {
+    "10th grade percentage or GPA": "What was your 10th grade / secondary school percentage?",
+    "12th grade percentage or GPA": "What was your 12th grade / higher-secondary percentage?",
+    "undergraduate cgpa or gpa": "What is your undergraduate CGPA / GPA?",
+    "notice period": "What is your notice period / earliest start date?",
+    "expected salary": "What is your expected salary (leave blank to skip)?",
+}
+
+
+_STOP = {
+    "what", "is", "are", "was", "were", "your", "the", "please", "enter", "for",
+    "you", "do", "did", "have", "has", "provide", "tell", "us", "me", "and", "of",
+}
+
+
+def normalize_question(question: str) -> str:
+    return " ".join(question.lower().strip().split())
+
+
+def _significant_tokens(question: str) -> set[str]:
+    words = re.findall(r"[a-z0-9]+", normalize_question(question))
+    return {w for w in words if w not in _STOP and len(w) > 2}
+
+
+def _numeric_tokens(tokens: set[str]) -> set[str]:
+    return {t for t in tokens if any(ch.isdigit() for ch in t)}
+
+
+def remember(profile: Profile, question: str, answer: str) -> None:
+    """Persist an answer to an arbitrary question so it's never asked again."""
+    if answer not in (None, ""):
+        profile.extra[normalize_question(question)] = answer
+
+
+def recall(profile: Profile, question: str) -> str | None:
+    """Find a stored answer, tolerant of phrasing but never conflating distinct
+    numbered questions (e.g. 10th vs 12th grade)."""
+    key = normalize_question(question)
+    if key in profile.extra:
+        return profile.extra[key]
+
+    q_tokens = _significant_tokens(question)
+    q_nums = _numeric_tokens(q_tokens)
+    for stored_q, ans in profile.extra.items():
+        s_tokens = _significant_tokens(stored_q)
+        if not q_tokens or not s_tokens:
+            if stored_q in key or key in stored_q:
+                return ans
+            continue
+        # Differing numeric/ordinal tokens => different questions (10th vs 12th).
+        if q_nums ^ _numeric_tokens(s_tokens):
+            continue
+        shared = q_tokens & s_tokens
+        ratio = len(shared) / min(len(q_tokens), len(s_tokens))
+        if len(shared) >= 2 and ratio >= 0.6:
+            return ans
+    return None
+
+
+def missing_extra_fields(profile: Profile) -> dict[str, str]:
+    """Common extra fields not yet answered (via fuzzy recall), as {key: question}."""
+    return {k: q for k, q in COMMON_EXTRA.items() if recall(profile, k) is None}
+
+
+def apply_extra(profile: Profile, answers: dict[str, str]) -> Profile:
+    """Store a batch of {question: answer} into the persistent extra memory."""
+    for question, answer in answers.items():
+        remember(profile, question, answer)
     return profile

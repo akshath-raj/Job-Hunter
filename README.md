@@ -57,12 +57,21 @@ Set a provider key in `.env` (see [Configuration](#configuration)), then:
 ```bash
 job-hunter run -r ~/resume.pdf -d "new-grad SWE, US only" --limit 5   # whole pipeline
 # or step by step:
-job-hunter onboard -r resume.pdf -d "…"   # analyze resume + fill missing details
+job-hunter onboard -r resume.pdf -d "…"   # analyze resume + ask 10th/12th marks etc. (once)
 job-hunter search                          # search LinkedIn, store jobs
+job-hunter enrich                          # research company/salary/quals (cheap subagents)
+job-hunter export                          # write jobs.xlsx to review
 job-hunter jobs --status eligible          # review what passed your rules
-job-hunter apply --limit 5                 # apply autonomously
-job-hunter status                          # counts by status
+job-hunter apply --limit 5                 # AUTO: apply autonomously to top matches
+job-hunter apply --mode select             # HUMAN-IN-LOOP: list jobs, you pick which
+job-hunter apply --concurrency 3           # apply to several at once (bounded)
 ```
+
+**Two apply modes:** `--mode auto` applies to your top eligible matches with no
+prompts; `--mode select` lists the enriched jobs and lets you choose exactly
+which to apply to. Anything the resume didn't cover (10th/12th marks, CGPA,
+notice period) is asked **once** at onboarding and remembered across all future
+sessions — and reused to auto-answer application questions.
 
 ### As an MCP server for Claude Code
 
@@ -90,11 +99,21 @@ directly with full page context.
 |------|---------|
 | `analyze_resume_prompt` / `save_resume_analysis` | Understand the resume (Claude reasons it out — no key needed) |
 | `get_profile` / `set_profile_fields` / `missing_profile_fields` | Manage identity details |
+| `missing_extra_fields` / `remember_answers` / `get_extra` | Ask-once memory (10th/12th marks, CGPA…) reused every session |
 | `set_constraints` | Hard rules — student, seniority ceiling, remote, locations, exclusions |
 | `login_linkedin` | One-time LinkedIn sign-in |
 | `search_jobs` / `list_jobs` / `job_status_counts` | Find and inspect jobs |
-| `apply_to_job` / `apply_batch` | Autonomously apply (eligibility-gated) |
+| `enrichment_tasks` / `set_job_enrichment` | Research company/salary/quals (run as cheap subagents w/ web search) |
+| `export_excel` | Write a spreadsheet of jobs for the human-in-the-loop pick |
+| `apply_batch` (mode=`auto`\|`select`) / `apply_to_job` | Autonomous or human-selected applying (eligibility-gated, concurrent) |
 | `pending_input_jobs` | What's paused waiting on you |
+
+**Recommended MCP flow for "apply to N jobs":** `analyze_resume_prompt` →
+`save_resume_analysis` → `missing_extra_fields` (ask user, `remember_answers`) →
+`search_jobs` → `enrichment_tasks` (spawn **Haiku** subagents w/ WebSearch for
+salary) → `set_job_enrichment` → `export_excel`. Then **autonomous:**
+`apply_batch(mode="auto")`, or **human-in-the-loop:** show the sheet, ask which,
+`apply_batch(mode="select", selected_ids=[…])`.
 
 </details>
 

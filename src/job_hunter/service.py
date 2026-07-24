@@ -8,11 +8,13 @@ and resumed.
 
 from __future__ import annotations
 
+import asyncio
+
 from . import constraints, store
 from . import profile as profile_mod
 from .apply.engine import apply_to_job
 from .linkedin import browser, search
-from .models import JobStatus, Profile
+from .models import Job, JobStatus, Profile
 from .resume import analyze, extract
 
 # ---- onboarding -----------------------------------------------------------
@@ -96,45 +98,80 @@ async def search_jobs(
 
 # ---- apply ----------------------------------------------------------------
 
+def _already_applied(job_id: str) -> bool:
+    app = store.get_application(job_id)
+    return bool(app and app.status in {JobStatus.applied, JobStatus.skipped})
+
+
+def pending_eligible(limit: int | None = None) -> list[Job]:
+    """Eligible jobs not yet applied to — the candidate pool for applying."""
+    jobs = [j for j in store.list_jobs(status=JobStatus.eligible) if not _already_applied(j.id)]
+    return jobs[:limit] if limit else jobs
+
+
+def _bucket(status: JobStatus) -> str:
+    return {
+        JobStatus.applied: "applied",
+        JobStatus.needs_input: "needs_input",
+        JobStatus.skipped: "skipped",
+        JobStatus.failed: "failed",
+    }.get(status, "failed")
+
+
 async def apply_batch(
     profile: Profile,
     limit: int = 10,
+    mode: str = "auto",
+    selected_ids: list[str] | None = None,
     use_llm: bool = True,
     headless: bool = False,
+    concurrency: int = 2,
 ) -> dict:
-    """Apply to up to `limit` eligible, not-yet-applied jobs."""
-    eligible = [
-        j for j in store.list_jobs(status=JobStatus.eligible)
-        if not _already_applied(j.id)
-    ][:limit]
-    if not eligible:
-        return {"applied": 0, "message": "No eligible pending jobs. Run a search first."}
+    """Apply to jobs, concurrently, in one of two modes.
+
+    mode="auto"   -> apply to up to `limit` eligible pending jobs.
+    mode="select" -> apply only to `selected_ids` (the human-in-the-loop choice).
+
+    `concurrency` runs several applications in parallel tabs; keep it modest to
+    stay human-like and avoid tripping LinkedIn's anti-automation.
+    """
+    if mode == "select":
+        if not selected_ids:
+            return {"error": "select mode requires selected_ids (list_jobs / Excel to pick)."}
+        jobs = [
+            j for j in (store.get_job(i) for i in selected_ids)
+            if j and not _already_applied(j.id)
+        ]
+    else:
+        jobs = pending_eligible(limit)
+    if not jobs:
+        return {"applied": 0, "message": "No matching pending jobs. Search (and select) first."}
 
     results = {"applied": 0, "needs_input": 0, "skipped": 0, "failed": 0, "details": []}
+    sem = asyncio.Semaphore(max(1, concurrency))
+
     async with browser.session(headless=headless) as s:
         if not await s.is_logged_in():
             return {"error": "Not logged into LinkedIn. Run `job-hunter login` first."}
-        for job in eligible:
-            app = await apply_to_job(s, job, profile, use_llm=use_llm)
-            bucket = {
-                JobStatus.applied: "applied",
-                JobStatus.needs_input: "needs_input",
-                JobStatus.skipped: "skipped",
-                JobStatus.failed: "failed",
-            }.get(app.status, "failed")
-            results[bucket] += 1
+
+        async def worker(job: Job) -> None:
+            async with sem:
+                page = await s.context.new_page()
+                try:
+                    app = await apply_to_job(s.context, page, job, profile, use_llm=use_llm)
+                finally:
+                    await page.close()
+            results[_bucket(app.status)] += 1
             results["details"].append({
+                "job_id": job.id,
                 "job": f"{job.title} @ {job.company}",
                 "status": app.status.value,
                 "prompt": app.needs_input_prompt,
                 "error": app.error,
             })
+
+        await asyncio.gather(*(worker(j) for j in jobs))
     return results
-
-
-def _already_applied(job_id: str) -> bool:
-    app = store.get_application(job_id)
-    return bool(app and app.status in {JobStatus.applied, JobStatus.skipped})
 
 
 async def apply_single(profile: Profile, job_id: str, use_llm: bool = True,
@@ -145,7 +182,53 @@ async def apply_single(profile: Profile, job_id: str, use_llm: bool = True,
     async with browser.session(headless=headless) as s:
         if not await s.is_logged_in():
             return {"error": "Not logged into LinkedIn. Run `job-hunter login` first."}
-        app = await apply_to_job(s, job, profile, use_llm=use_llm)
+        page = await s.context.new_page()
+        try:
+            app = await apply_to_job(s.context, page, job, profile, use_llm=use_llm)
+        finally:
+            await page.close()
     return {"job": f"{job.title} @ {job.company}", "status": app.status.value,
             "prompt": app.needs_input_prompt, "error": app.error,
             "screenshot": app.screenshot_path}
+
+
+# ---- enrichment, export, memory -------------------------------------------
+
+async def enrich_jobs(job_ids: list[str] | None = None, limit: int = 25,
+                      concurrency: int = 3) -> dict:
+    """Enrich jobs (company/salary/qualifications) via research sub-agents."""
+    from . import enrich
+
+    if job_ids:
+        jobs = [j for j in (store.get_job(i) for i in job_ids) if j]
+    else:
+        jobs = [j for j in store.list_jobs() if not j.enriched][:limit]
+    if not jobs:
+        return {"enriched": 0, "message": "Nothing to enrich."}
+
+    sem = asyncio.Semaphore(max(1, concurrency))
+
+    async def worker(job: Job) -> None:
+        async with sem:
+            await enrich.enrich(job)
+        store.update_job(job)
+
+    await asyncio.gather(*(worker(j) for j in jobs))
+    return {"enriched": len(jobs)}
+
+
+def export_excel(status: JobStatus | None = None, path: str | None = None) -> dict:
+    """Write the (optionally filtered) jobs to an .xlsx and return its path."""
+    from . import export
+
+    jobs = store.list_jobs(status=status, limit=1000)
+    out = export.to_excel(jobs, path)
+    return {"path": out, "rows": len(jobs)}
+
+
+def remember_answers(answers: dict[str, str]) -> dict:
+    """Persist {question: answer} to the ask-once memory so we never re-ask."""
+    prof = profile_mod.load()
+    profile_mod.apply_extra(prof, answers)
+    profile_mod.save(prof)
+    return {"saved": len(answers), "extra_keys": list(prof.extra.keys())}

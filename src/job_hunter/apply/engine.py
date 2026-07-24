@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 
 from .. import config, constraints, store
 from ..linkedin import easy_apply
-from ..linkedin.browser import Session, human_pause
+from ..linkedin.browser import human_pause
 from ..models import Application, Job, JobStatus, Profile
 from . import forms
 from .answerer import ProfileAnswerer
@@ -36,7 +36,7 @@ async def _screenshot(page, job: Job) -> str | None:
 
 
 async def apply_to_job(
-    s: Session, job: Job, profile: Profile, use_llm: bool = True
+    context, page, job: Job, profile: Profile, use_llm: bool = True
 ) -> Application:
     existing = store.get_application(job.id)
     if existing and existing.status == JobStatus.applied:
@@ -58,9 +58,9 @@ async def apply_to_job(
 
     # --- route ------------------------------------------------------------
     if job.easy_apply:
-        app = await _easy_apply(s, job, answerer)
+        app = await _easy_apply(page, job, answerer)
     else:
-        app = await _external_apply(s, job, profile, answerer)
+        app = await _external_apply(context, page, job, profile, answerer)
 
     job.status = app.status
     store.update_job(job)
@@ -68,13 +68,13 @@ async def apply_to_job(
     return app
 
 
-async def _easy_apply(s: Session, job: Job, answerer: ProfileAnswerer) -> Application:
-    res = await easy_apply.apply(s, job.url, answerer)
+async def _easy_apply(page, job: Job, answerer: ProfileAnswerer) -> Application:
+    res = await easy_apply.apply(page, job.url, answerer)
     app = Application(job_id=job.id, method="easy_apply", answers=res.answers)
     if res.submitted:
         app.status = JobStatus.applied
         app.submitted_at = _now()
-        app.screenshot_path = await _screenshot(s.page, job)
+        app.screenshot_path = await _screenshot(page, job)
     elif res.needs_input:
         app.status = JobStatus.needs_input
         app.needs_input_prompt = res.prompt
@@ -85,10 +85,9 @@ async def _easy_apply(s: Session, job: Job, answerer: ProfileAnswerer) -> Applic
 
 
 async def _external_apply(
-    s: Session, job: Job, profile: Profile, answerer: ProfileAnswerer
+    context, page, job: Job, profile: Profile, answerer: ProfileAnswerer
 ) -> Application:
     app = Application(job_id=job.id, method="external_form")
-    page = s.page
     await page.goto(job.url, wait_until="domcontentloaded")
     await human_pause(1.0, 2.0)
 
@@ -101,7 +100,7 @@ async def _external_apply(
     # External "Apply" usually opens the company site in a new tab.
     new_page = None
     try:
-        async with s.context.expect_page(timeout=8000) as pinfo:
+        async with context.expect_page(timeout=8000) as pinfo:
             await apply_btn.click()
         new_page = await pinfo.value
         await new_page.wait_for_load_state("domcontentloaded")

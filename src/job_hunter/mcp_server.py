@@ -161,9 +161,92 @@ async def apply_to_job(job_id: str, use_llm: bool = True) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def apply_batch(limit: int = 10, use_llm: bool = True) -> dict[str, Any]:
-    """Autonomously apply to up to `limit` eligible pending jobs."""
-    return await service.apply_batch(profile_mod.load(), limit=limit, use_llm=use_llm)
+async def apply_batch(
+    limit: int = 10,
+    mode: str = "auto",
+    selected_ids: list[str] | None = None,
+    use_llm: bool = True,
+    concurrency: int = 2,
+) -> dict[str, Any]:
+    """Apply to jobs concurrently.
+
+    mode="auto": apply to up to `limit` eligible pending jobs (no human in loop).
+    mode="select": apply ONLY to `selected_ids` — use this for human-in-the-loop
+    (call list_jobs or export_excel, let the user pick, then pass their ids here).
+    """
+    return await service.apply_batch(
+        profile_mod.load(), limit=limit, mode=mode, selected_ids=selected_ids,
+        use_llm=use_llm, concurrency=concurrency,
+    )
+
+
+# ---- enrichment & export (for the human-in-the-loop spreadsheet) ----------
+
+@mcp.tool()
+def enrichment_tasks(job_ids: list[str] | None = None, limit: int = 25) -> list[dict[str, Any]]:
+    """Return research prompts to enrich jobs (company/salary/qualifications).
+
+    Run each `prompt` as a subagent WITH WEB SEARCH at `suggested_model` (cheap),
+    then post results back via `set_job_enrichment`. This is how salary gets
+    researched when the posting omits it.
+    """
+    from . import enrich
+
+    if job_ids:
+        jobs = [j for j in (store.get_job(i) for i in job_ids) if j]
+    else:
+        jobs = [j for j in store.list_jobs(limit=1000) if not j.enriched][:limit]
+    return [
+        {"job_id": j.id, "job": f"{j.title} @ {j.company}",
+         "suggested_model": "claude-haiku-4-5", "prompt": enrich.enrichment_prompt(j)}
+        for j in jobs
+    ]
+
+
+@mcp.tool()
+def set_job_enrichment(job_id: str, about: str = "", salary: str = "",
+                       qualifications: str = "", source: str = "") -> dict[str, Any]:
+    """Store enrichment results (from your research subagent) onto a job."""
+    from . import enrich
+
+    job = store.get_job(job_id)
+    if not job:
+        return {"error": f"Unknown job {job_id}"}
+    enrich.apply_enrichment(job, {"about": about, "salary": salary,
+                                  "qualifications": qualifications, "source": source})
+    store.update_job(job)
+    return {"saved": True, "job": job.model_dump()}
+
+
+@mcp.tool()
+def export_excel(status: str | None = None, path: str | None = None) -> dict[str, Any]:
+    """Write jobs (optionally filtered by status) to an Excel workbook. Returns the path."""
+    st = JobStatus(status) if status else None
+    return service.export_excel(status=st, path=path)
+
+
+# ---- ask-once memory ------------------------------------------------------
+
+@mcp.tool()
+def missing_extra_fields() -> dict[str, str]:
+    """Common off-resume fields not yet known (10th/12th marks, CGPA, notice…). Ask these."""
+    return profile_mod.missing_extra_fields(profile_mod.load())
+
+
+@mcp.tool()
+def remember_answers(answers: dict[str, str]) -> dict[str, Any]:
+    """Persist {question: answer} to ask-once memory so it's reused every session.
+
+    Use this after the user answers anything not on their resume (e.g. an
+    application asked for 10th-grade marks) so we never ask again.
+    """
+    return service.remember_answers(answers)
+
+
+@mcp.tool()
+def get_extra() -> dict[str, str]:
+    """Return everything stored in the ask-once memory."""
+    return profile_mod.load().extra
 
 
 @mcp.tool()
