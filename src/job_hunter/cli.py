@@ -320,9 +320,12 @@ def run(
     mode: str = typer.Option("auto", "--mode", help="'auto' or 'select'."),
 ):
     """Full pipeline: onboard -> search (+enrich +Excel) -> apply."""
+    # Pass EVERY parameter explicitly — calling a Typer command directly leaves
+    # unspecified args as OptionInfo objects, not their defaults.
     onboard(resume=resume, description=description)
-    search(query=None, tier=tier)   # also enriches and writes the spreadsheet
-    apply(limit=limit, job=None, mode=mode, concurrency=2, no_llm=False)
+    search(query=None, tier=tier, target=None, easy_only=False,
+           recent_days=None, headless=False)
+    apply(limit=limit, job=None, mode=mode, concurrency=2, no_llm=False, headless=False)
 
 
 @app.command()
