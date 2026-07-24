@@ -10,3 +10,6 @@ build/
 .jobhunter/
 data/
 *.db
+# generated job spreadsheet
+jobs.xlsx
+*.xlsx

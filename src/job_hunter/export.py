@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import config
 from .models import Job
 
 _COLUMNS = [
@@ -28,8 +27,10 @@ def to_excel(jobs: list[Job], path: str | Path | None = None) -> str:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
 
-    config.ensure_dirs()
-    out = Path(path) if path else config.HOME / "jobs.xlsx"
+    # Default to the current working directory (i.e. the repo folder when run
+    # from there) so the spreadsheet is easy to find and open — not buried in
+    # ~/.jobhunter with the internal state.
+    out = Path(path) if path else Path.cwd() / "jobs.xlsx"
 
     wb = Workbook()
     ws = wb.active

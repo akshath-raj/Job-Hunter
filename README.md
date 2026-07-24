@@ -68,7 +68,7 @@ job-hunter apply --concurrency 3           # apply to several at once (bounded)
 **`search` builds the spreadsheet.** As it finds jobs it enriches them in
 parallel tabs — company summary, qualifications, and **salary researched on the
 web (Glassdoor/Levels.fyi) whenever the posting omits it** — then writes
-`~/.jobhunter/jobs.xlsx`.
+`./jobs.xlsx` (in the folder you run it from).
 
 **Two apply modes:** `--mode auto` applies to your top eligible matches with no
 prompts; `--mode select` lists the (already enriched) jobs and lets you choose
