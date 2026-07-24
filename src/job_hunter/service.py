@@ -64,6 +64,37 @@ def candidate_brief() -> str:
     return config.BRIEF_PATH.read_text() if config.BRIEF_PATH.exists() else ""
 
 
+def process_search_preferences(raw: dict[str, str]) -> dict:
+    """LLM-process raw search answers into a structured strategy and save it.
+
+    raw = {salary, locations, remote, additional}. Falls back to storing the raw
+    answers directly when no LLM provider is configured.
+    """
+    from . import config, preferences
+
+    prof = profile_mod.load()
+    if config.has_llm():
+        try:
+            data = preferences.process(candidate_brief(), prof.target_roles, raw)
+            preferences.apply_processed(prof, data)
+            profile_mod.save(prof)
+            return {"processed": True, "search_context": prof.search_context,
+                    "search_keywords": prof.search_keywords,
+                    "locations": prof.constraints.locations,
+                    "exclude_keywords": prof.constraints.exclude_keywords}
+        except Exception:  # noqa: BLE001 — fall back to raw storage
+            pass
+    profile_mod.set_search_preferences(
+        prof, expected_salary=raw.get("salary") or None,
+        locations=raw.get("locations") or None,
+        remote_only=bool(raw.get("remote")),
+        additional_details=raw.get("additional") or None,
+    )
+    profile_mod.save(prof)
+    return {"processed": False, "search_context": prof.search_context,
+            "search_keywords": prof.search_keywords}
+
+
 # ---- search ---------------------------------------------------------------
 
 async def search_jobs(

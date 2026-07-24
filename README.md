@@ -171,8 +171,9 @@ job-hunter onboard -r ~/resume.pdf -d "remote backend roles, no crypto"
 # 3. (Optional) See how it understood you.
 job-hunter brief
 
-# 4. Search LinkedIn. Asks salary/location once, researches salaries in
-#    parallel, filters off-target jobs, and writes ./jobs.xlsx.
+# 4. Search LinkedIn. Asks salary/location/preferences once (LLM-processed into
+#    a search strategy), researches salaries in parallel, filters off-target
+#    jobs, and writes ./jobs.xlsx.
 job-hunter search --max 20
 
 # 5. Review what it found and what it filtered out.

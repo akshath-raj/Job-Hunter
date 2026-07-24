@@ -87,6 +87,10 @@ class Profile(BaseModel):
     # (salary expectation, locations, remote). Asked once, at first search.
     search_prefs_collected: bool = False
 
+    # LLM-processed search strategy: a tight brief the search agent reads for
+    # context (what to prioritize, company preferences, deal-breakers).
+    search_context: str | None = None
+
     # Ask-once persistent memory. Anything not on the resume that an application
     # asked for (10th/12th marks, CGPA, notice period, ...) is remembered here,
     # keyed by a normalized question, and reused across every future session.

@@ -161,6 +161,10 @@ SEARCH_PREF_QUESTIONS = {
     "expected salary": "What's your expected salary / compensation? (e.g. '20 LPA', or blank)",
     "preferred locations": "Preferred job locations, comma-separated? (or blank for any)",
     "remote only": "Only remote roles? (y/N)",
+    "additional details": (
+        "Anything else the search agent should know? (company types, must-haves, "
+        "deal-breakers, industries to avoid, etc. — or blank)"
+    ),
 }
 
 
@@ -173,8 +177,10 @@ def set_search_preferences(
     expected_salary: str | None = None,
     locations: str | list[str] | None = None,
     remote_only: bool | None = None,
+    additional_details: str | None = None,
+    search_context: str | None = None,
 ) -> Profile:
-    """Apply search-time preferences and mark them collected (so we ask once)."""
+    """Low-level setter (used as the no-LLM fallback and by the MCP tool)."""
     if expected_salary:
         remember(profile, "expected salary", expected_salary)
     if locations:
@@ -185,5 +191,10 @@ def set_search_preferences(
             profile.constraints.locations = locs
     if remote_only is not None:
         profile.constraints.remote_only = remote_only
+    # Prefer a processed context; otherwise keep the user's raw additional notes.
+    if search_context:
+        profile.search_context = search_context.strip()
+    elif additional_details:
+        profile.search_context = additional_details.strip()
     profile.search_prefs_collected = True
     return profile

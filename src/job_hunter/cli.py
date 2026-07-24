@@ -99,19 +99,25 @@ def search(
     """Search LinkedIn for jobs matching your profile and store them."""
     p = profile_mod.load()
 
-    # One-time: collect preferences that aren't on a resume (salary, location...).
+    # One-time: collect preferences that aren't on a resume, then LLM-process
+    # them (with the résumé brief) into a search strategy the agent reads.
     if profile_mod.needs_search_preferences(p):
-        console.print("[dim]A couple of preferences for this search "
+        console.print("[dim]A few preferences for this search "
                       "(asked once, press Enter to skip):[/]")
         q = profile_mod.SEARCH_PREF_QUESTIONS
         salary = typer.prompt(q["expected salary"], default="")
         locations = typer.prompt(q["preferred locations"], default="")
         remote = typer.confirm("Only remote roles?", default=False)
-        profile_mod.set_search_preferences(
-            p, expected_salary=salary or None,
-            locations=locations or None, remote_only=remote,
-        )
-        profile_mod.save(p)
+        additional = typer.prompt(q["additional details"], default="")
+        console.print("[cyan]Processing your preferences...[/]")
+        res = service.process_search_preferences({
+            "salary": salary, "locations": locations,
+            "remote": "yes" if remote else "", "additional": additional,
+        })
+        p = profile_mod.load()
+        if res.get("search_context"):
+            console.print(f"[green]Search strategy:[/] {res['search_context']}")
+        console.print(f"[green]Searching for:[/] {', '.join(p.search_keywords) or '—'}")
 
     console.print("[cyan]Searching LinkedIn + researching salaries (parallel)...[/]")
     res = _run(service.search_jobs(p, queries=query or None, max_per_query=max))

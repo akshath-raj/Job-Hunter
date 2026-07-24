@@ -156,15 +156,35 @@ def set_search_preferences(
     expected_salary: str = "",
     locations: list[str] | None = None,
     remote_only: bool = False,
+    refined_keywords: list[str] | None = None,
+    exclude_keywords: list[str] | None = None,
+    search_context: str = "",
+    additional_details: str = "",
 ) -> dict[str, Any]:
-    """Save one-time search prefs (salary expectation, locations, remote). Asked once."""
-    prof = profile_mod.set_search_preferences(
-        profile_mod.load(), expected_salary=expected_salary or None,
-        locations=locations, remote_only=remote_only,
-    )
+    """Save the processed search strategy (asked once).
+
+    You are the brain here: after reading the candidate brief and the user's
+    answers (including their free-text "additional details"), YOU produce the
+    strategy and pass it in — `refined_keywords` (exact LinkedIn search strings
+    for their specialization), `exclude_keywords` (deal-breakers), and a tight
+    `search_context` paragraph. `additional_details` (raw) is stored as context
+    if you don't supply `search_context`.
+    """
+    from . import preferences
+
+    prof = profile_mod.load()
+    preferences.apply_processed(prof, {
+        "expected_salary": expected_salary or None,
+        "locations": locations,
+        "remote_only": remote_only,
+        "refined_keywords": refined_keywords,
+        "exclude_keywords": exclude_keywords,
+        "search_context": search_context or additional_details or None,
+    })
     profile_mod.save(prof)
-    return {"saved": True, "constraints": prof.constraints.model_dump(),
-            "expected_salary": prof.extra.get("expected salary")}
+    return {"saved": True, "search_keywords": prof.search_keywords,
+            "search_context": prof.search_context,
+            "constraints": prof.constraints.model_dump()}
 
 
 @mcp.tool()

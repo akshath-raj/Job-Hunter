@@ -13,19 +13,24 @@ from typing import Any
 from .. import llm
 from ..models import Profile, Seniority
 
-ANALYSIS_SYSTEM = """You are a career analyst. Read the candidate's resume CLOSELY \
-and build an accurate picture of what they actually do: their field/domain, the \
-kind of work and problems they've worked on, the technologies they use, and the \
-level they're at. Then produce a structured profile used to SEARCH and apply for \
-jobs on their behalf.
+ANALYSIS_SYSTEM = """You are a world-class technical recruiter and career analyst. \
+You read a résumé the way a hiring manager in the candidate's own field would — \
+you can tell a computer-vision researcher from an MLOps engineer from a \
+full-stack developer, and you know the difference matters.
 
-Be precise, not generic. The search keywords you produce must match THIS \
-candidate's real specialization — e.g. a CV/ML student is "Machine Learning \
-Engineer", "Computer Vision Engineer", "AI Research Intern", NOT a broad \
-"Software Engineer". Wrong/broad keywords produce irrelevant jobs, which is the \
-main failure to avoid.
+Your job: build a precise, evidence-based picture of what THIS candidate actually \
+does — their domain, the concrete problems they've solved, the tools and \
+techniques they use, the scale/impact of their work, and their real seniority — \
+and turn it into a search strategy that finds the RIGHT jobs, not just any jobs.
 
-Infer conservatively on seniority. A current student or a future graduation date \
+Rules:
+- Be specific, never generic. Ground every claim in the résumé. The search \
+keywords must match the candidate's true specialization (e.g. "Machine Learning \
+Engineer", "Computer Vision Intern", "Applied Scientist" — NOT a catch-all \
+"Software Engineer"). Broad/wrong keywords are the #1 failure to avoid.
+- The brief must be genuinely detailed and useful to a downstream search agent \
+that has never seen the résumé — cite real projects, technologies, and results.
+- Infer seniority conservatively. A current student or a future graduation date \
 means the candidate is a student and is NOT eligible for senior/staff/lead roles \
 — cap them (interns/new-grad/entry only).
 
@@ -39,9 +44,14 @@ ANALYSIS_INSTRUCTIONS = """Return a JSON object with exactly these keys:
                                    // specialization (used verbatim as the job search queries)
   "domains": [string],             // fields/domains they work in, e.g. "Computer Vision", "NLP"
   "core_competencies": [string],   // 5-10 defining skills/areas (used for relevance scoring)
-  "brief": string,                 // a DETAILED markdown brief (~200-400 words): who they are,
-                                   // their domain, what they've built/worked on, technologies,
-                                   // level, and exactly what roles to search for and why.
+  "brief": string,                 // a DETAILED markdown brief (250-450 words) with sections:
+                                   //   ## Who they are   (field, level, one-line positioning)
+                                   //   ## Experience & projects  (SPECIFIC work, tech, results
+                                   //      taken from the résumé — no filler)
+                                   //   ## Core strengths
+                                   //   ## Ideal roles & why they fit
+                                   //   ## What to avoid  (off-target roles, deal-breakers)
+                                   // This is the search agent's only context — make it excellent.
   "seniority": string,             // the candidate's OWN level (one of the allowed values)
   "max_seniority": string,         // highest level they should apply to (student => "entry")
   "skills": [string],              // top ~15 skills/technologies
