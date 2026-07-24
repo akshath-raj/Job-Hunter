@@ -1,223 +1,307 @@
-<h1 align="center">🎯 Job Hunter</h1>
+<div align="center">
 
-<p align="center">
-  <em>An autonomous LinkedIn job-hunting agent — as a CLI and as an MCP server for Claude Code.</em>
-</p>
+# 🎯 Job Hunter
 
-<p align="center">
-  <a href="#quickstart">Quickstart</a> ·
-  <a href="#two-ways-to-run-it">Two ways to run it</a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#configuration">Configuration</a> ·
-  <a href="#safety--limitations">Safety</a>
-</p>
+**An autonomous LinkedIn job-hunting agent — as a CLI *and* an MCP server for Claude Code.**
+
+Point it at your résumé. It learns what you do, searches LinkedIn for genuinely
+relevant roles, researches the details, and applies on your behalf — while
+respecting the hard rules you set.
+
+[![CI](https://github.com/akshath-raj/Job-Hunter/actions/workflows/ci.yml/badge.svg)](https://github.com/akshath-raj/Job-Hunter/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+</div>
+
+> [!WARNING]
+> Automating LinkedIn violates its Terms of Service and can get your account
+> restricted. In autonomous mode this submits **real applications under your real
+> identity**. Use it deliberately, on your own account, and start small. See
+> [Safety & limitations](#-safety--limitations).
 
 ---
 
-Point it at your resume. It figures out what roles fit you, searches LinkedIn,
-and applies on your behalf — while respecting hard rules you set (e.g. *a college
-student never applies to senior roles*). It fills LinkedIn Easy Apply, external
-career sites, and Google Forms; when a site needs an account it can read the
-email verification code from Gmail; and when it truly can't answer something, it
-pauses and asks you.
+## Table of contents
 
-> [!WARNING]
-> **Read [Safety & limitations](#safety--limitations) before using.** Automating
-> LinkedIn violates its Terms of Service and can get your account restricted. In
-> autonomous mode this submits **real applications under your real identity**.
-> Use it deliberately, on your own accounts, and start with a small `--limit`.
+- [Why](#-why)
+- [Features](#-features)
+- [How it works](#-how-it-works)
+- [Installation](#-installation)
+- [Configuration](#-configuration)
+- [Usage](#-usage)
+  - [Standalone CLI](#standalone-cli)
+  - [As an MCP server (Claude Code)](#as-an-mcp-server-claude-code)
+- [Command reference](#-command-reference)
+- [Reusing your existing Chrome login](#-reusing-your-existing-chrome-login)
+- [Your data & privacy](#-your-data--privacy)
+- [Safety & limitations](#-safety--limitations)
+- [Development](#-development)
+- [License](#-license)
 
-## Quickstart
+---
 
-```bash
-git clone https://github.com/akshath/job-hunter && cd job-hunter
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
-playwright install chromium          # or rely on your system Chrome
+## 💡 Why
 
-job-hunter login                                       # sign into LinkedIn once
-job-hunter onboard -r ~/resume.pdf -d "remote backend roles, no crypto"
-job-hunter search                                      # find + store matches
-job-hunter apply --limit 5                             # autonomously apply
+Job hunting is repetitive: read a posting, judge if it fits, fill the same
+details again, repeat a hundred times. Job Hunter automates that loop with an
+important guardrail — it only applies to roles that pass **your** hard rules
+(a student never applies to senior roles) and are actually **relevant to your
+background** (no random "Sales Engineer" because it shared a keyword).
+
+It runs two ways from one codebase:
+
+|                     | **Standalone CLI**                     | **MCP server (Claude Code)**            |
+| ------------------- | -------------------------------------- | --------------------------------------- |
+| Who's the "brain"?  | An LLM you configure (Anthropic/OpenAI) | Claude Code itself                      |
+| API key needed?     | Yes                                    | **No**                                  |
+| Novel / weird sites | Best-effort heuristics                 | Claude drives the browser directly      |
+| Best for            | Unattended batch runs                  | Interactive control & hard cases        |
+
+---
+
+## ✨ Features
+
+- **Résumé understanding** — extracts everything (skills, education marks, CGPA,
+  contact) and writes a detailed `candidate_brief.md` describing what you do.
+- **Relevant search** — derives precise search keywords for *your* specialization
+  and filters out off-target results with a relevance score.
+- **Salary research** — when a posting omits pay, a parallel agent looks it up on
+  the web (Glassdoor / Levels.fyi).
+- **Spreadsheet** — every search writes a `jobs.xlsx` with company, salary,
+  qualifications, and link.
+- **Two apply modes** — fully autonomous, or human-in-the-loop (you pick from the list).
+- **Ask-once memory** — anything not on your résumé is asked once and remembered
+  forever, then reused to auto-answer applications.
+- **Handles the hassle** — LinkedIn Easy Apply, external career sites, Google
+  Forms, and account signup (reads verification codes from Gmail).
+- **Resilient** — detects mid-run session expiry / security checks and resumes;
+  everything is persisted so no progress is lost.
+
+---
+
+## 🔍 How it works
+
+```
+ résumé (pdf/docx) ──▶ extract ──▶ role analyzer ──▶ profile.json + candidate_brief.md
+                                                          │
+             onboarding (only what's missing) ───────────┤
+                                                          ▼
+                                    constraints + relevance gate   ◀── your hard rules
+                                                          │
+ LinkedIn (your session) ──▶ search ──▶ enrich (salary, web) ──▶ jobs.xlsx
+                                                          │
+                                                          ▼
+                                      application engine (auto | you-pick)
+                                          ├─ Easy Apply
+                                          ├─ Google Form
+                                          └─ external site (+ signup via Gmail codes)
 ```
 
-## Two ways to run it
+---
 
-| | **Standalone CLI** | **MCP server (Claude Code)** |
-|---|---|---|
-| Who's the "brain"? | An LLM you configure (Anthropic **or** OpenAI) | Claude Code itself |
-| API key needed? | Yes | **No** |
-| Novel / weird sites | Best-effort heuristics | Claude drives Playwright directly |
-| Best for | Batch, unattended runs | Interactive, hard cases, oversight |
+## 📦 Installation
+
+**Prerequisites:** Python 3.11+, and Google Chrome installed.
+
+```bash
+# 1. Clone
+git clone https://github.com/akshath-raj/Job-Hunter.git
+cd Job-Hunter
+
+# 2. Create and activate a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+
+# 3. Install the package
+pip install -e .
+
+# 4. Install the browser Playwright drives
+playwright install chromium
+
+# 5. Configure (see next section)
+cp .env.example .env
+```
+
+Two commands are now on your PATH: **`job-hunter`** (the CLI) and
+**`job-hunter-mcp`** (the MCP server).
+
+---
+
+## ⚙️ Configuration
+
+Edit `.env`. Only a provider key is required, and only for standalone runs
+(Claude Code needs none). `.env` is auto-loaded; real exported env vars win.
+
+| Variable | Required? | Purpose |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | one provider | Use Anthropic as the standalone brain |
+| `OPENAI_API_KEY` | one provider | Use OpenAI as the standalone brain |
+| `JOBHUNTER_PROVIDER` | no | Force `anthropic` or `openai` (else: whichever key is set) |
+| `JOBHUNTER_MODEL` | no | Override the default model |
+| `GMAIL_ADDRESS` / `GMAIL_APP_PASSWORD` | no | Auto-read signup verification codes ([App Password](https://myaccount.google.com/apppasswords), never your real password) |
+| `JOBHUNTER_MIN_RELEVANCE` | no | Relevance cutoff `0-1` for dropping off-target jobs (default `0.22`) |
+| `JOBHUNTER_HOME` | no | Where local state lives (default `~/.jobhunter`) |
+| `JOBHUNTER_CDP_URL` | no | Attach to a running Chrome instead of launching one ([details](#-reusing-your-existing-chrome-login)) |
+
+**Provider selection:** set either key. If you set both, Anthropic wins unless
+`JOBHUNTER_PROVIDER=openai`. Defaults: `claude-sonnet-4-6` / `gpt-4o`.
+
+```env
+# Minimal .env for standalone use with OpenAI:
+JOBHUNTER_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+```
+
+---
+
+## 🚀 Usage
 
 ### Standalone CLI
 
-Set a provider key in `.env` (see [Configuration](#configuration)), then:
+A first run, step by step:
 
 ```bash
-job-hunter run -r ~/resume.pdf -d "new-grad SWE, US only" --limit 5   # whole pipeline
-# or step by step:
-job-hunter onboard -r resume.pdf -d "…"   # extract everything from resume; ask only what's missing
-job-hunter search                          # search + research salaries (Glassdoor) + write jobs.xlsx
-job-hunter jobs --status eligible          # review what passed your rules
-job-hunter apply --limit 5                 # AUTO: apply autonomously to top matches
-job-hunter apply --mode select             # HUMAN-IN-LOOP: list jobs, you pick which
-job-hunter apply --concurrency 3           # apply to several at once (bounded)
-job-hunter reset                           # delete ALL stored data about you (asks to confirm)
-job-hunter reset --keep-login              # wipe everything except the LinkedIn session
-job-hunter reset --only jobs               # clear just one: profile|jobs|session|artifacts|spreadsheet
+# 1. Log into LinkedIn once — opens a browser; the session persists.
+job-hunter login
+
+# 2. Understand your résumé. Extracts everything; asks only what's missing.
+job-hunter onboard -r ~/resume.pdf -d "remote backend roles, no crypto"
+
+# 3. (Optional) See how it understood you.
+job-hunter brief
+
+# 4. Search LinkedIn. Asks salary/location once, researches salaries in
+#    parallel, filters off-target jobs, and writes ./jobs.xlsx.
+job-hunter search --max 20
+
+# 5. Review what it found and what it filtered out.
+job-hunter jobs --status eligible
+job-hunter jobs --status ineligible
+
+# 6a. AUTONOMOUS: apply to your top matches with no prompts.
+job-hunter apply --limit 5
+
+# 6b. HUMAN-IN-THE-LOOP: list the jobs and choose which to apply to.
+job-hunter apply --mode select
 ```
 
-**`search` builds the spreadsheet.** As it finds jobs it enriches them in
-parallel tabs — company summary, qualifications, and **salary researched on the
-web (Glassdoor/Levels.fyi) whenever the posting omits it** — then writes
-`./jobs.xlsx` (in the folder you run it from).
-
-**Two apply modes:** `--mode auto` applies to your top eligible matches with no
-prompts; `--mode select` lists the (already enriched) jobs and lets you choose
-exactly which to apply to. Details not on the resume: education marks/CGPA are
-extracted automatically; salary expectation/location/remote are asked **once** at
-first search; anything else is asked only if a specific application needs it —
-then remembered forever.
-
-### As an MCP server for Claude Code
-
-Register the server (no API key required — Claude Code is the brain):
+Or run the whole pipeline at once:
 
 ```bash
-claude mcp add job-hunter -- job-hunter-mcp
+job-hunter run -r ~/resume.pdf -d "new-grad ML roles, US only" --limit 5
+```
+
+### As an MCP server (Claude Code)
+
+No API key needed — **Claude Code is the brain**. Register the server once:
+
+```bash
+claude mcp add job-hunter -s user -- /absolute/path/to/Job-Hunter/.venv/bin/job-hunter-mcp
+claude mcp list          # should show: job-hunter … ✔ Connected
 ```
 
 Then just talk to Claude Code:
 
-> *"Onboard me from ~/resume.pdf. I'm a college student looking for summer
-> internships, remote only. Find matching jobs and apply to 5."*
+> *"Using job-hunter, onboard me from ~/resume.pdf — I'm a final-year student
+> looking for remote ML internships. Search LinkedIn, show me the matches, and
+> let me pick which to apply to."*
 
-Claude calls the tools — `analyze_resume_prompt` → `save_resume_analysis` →
-`set_constraints` → `login_linkedin` → `search_jobs` → `apply_batch` — asks you
-for anything missing (phone, work authorization…), and for unusual application
-forms it drives the [Playwright MCP](https://github.com/microsoft/playwright-mcp)
-directly with full page context.
+Claude chains the tools, asks you for anything missing, researches salaries with
+web search, and handles unusual application forms by driving the browser
+directly. To see everything it can do, just ask Claude *"what job-hunter tools do
+you have?"*.
 
-<details>
-<summary><strong>MCP tools reference</strong></summary>
+---
 
-| Tool | Purpose |
-|------|---------|
-| `analyze_resume_prompt` / `save_resume_analysis` | Understand the resume (Claude reasons it out — no key needed) |
-| `get_profile` / `set_profile_fields` / `missing_profile_fields` | Manage identity details |
-| `missing_extra_fields` / `remember_answers` / `get_extra` | Ask-once memory (10th/12th marks, CGPA…) reused every session |
-| `set_constraints` | Hard rules — student, seniority ceiling, remote, locations, exclusions |
-| `login_linkedin` | One-time LinkedIn sign-in |
-| `search_jobs` / `list_jobs` / `job_status_counts` | Find and inspect jobs |
-| `enrichment_tasks` / `set_job_enrichment` | Research company/salary/quals (run as cheap subagents w/ web search) |
-| `export_excel` | Write a spreadsheet of jobs for the human-in-the-loop pick |
-| `apply_batch` (mode=`auto`\|`select`) / `apply_to_job` | Autonomous or human-selected applying (eligibility-gated, concurrent) |
-| `pending_input_jobs` | What's paused waiting on you |
+## 📖 Command reference
 
-**Recommended MCP flow for "apply to N jobs":** `analyze_resume_prompt` →
-`save_resume_analysis` → `missing_extra_fields` (ask user, `remember_answers`) →
-`search_jobs` → `enrichment_tasks` (spawn **Haiku** subagents w/ WebSearch for
-salary) → `set_job_enrichment` → `export_excel`. Then **autonomous:**
-`apply_batch(mode="auto")`, or **human-in-the-loop:** show the sheet, ask which,
-`apply_batch(mode="select", selected_ids=[…])`.
+| Command | What it does |
+| --- | --- |
+| `login` | Sign into LinkedIn once (session persists). |
+| `onboard -r <resume> [-d <notes>]` | Analyze résumé → profile + brief; ask only missing required fields. |
+| `brief` | Print the detailed candidate brief the search agent uses. |
+| `profile` | Show the full stored profile as JSON. |
+| `search [--max N] [-q <query>]` | Search LinkedIn, research salaries, filter, write `jobs.xlsx`. |
+| `jobs [--status <s>]` | List stored jobs (`eligible`, `ineligible`, `applied`, …). |
+| `enrich [--limit N]` | (Re)research company/salary/qualifications for stored jobs. |
+| `export [--status <s>] [--path <p>]` | Write jobs to an Excel spreadsheet. |
+| `apply [--limit N]` | **Autonomous** apply to top eligible matches. |
+| `apply --mode select` | **Human-in-the-loop** — list jobs, you pick. |
+| `apply --job <id>` / `--concurrency N` | Apply to one job / apply several in parallel. |
+| `status` | Counts of jobs by status. |
+| `reset [--keep-login] [--only <scope>]` | Delete stored data about you (asks to confirm). |
 
-</details>
+Run `job-hunter <command> --help` for all flags.
 
-## How it works
+---
 
-```
-resume ─▶ extract ─▶ role-analyzer ─▶ profile.json ◀─ onboarding (name, phone, work auth…)
-                                          │
-                                   constraints engine   ← the "student ≠ senior" safety gate
-                                          │
-LinkedIn (your session) ─▶ search/scrape ─▶ jobs.db ─▶ application engine
-                                                             ├─ Easy Apply
-                                                             ├─ Google Form
-                                                             └─ external site (+ signup via Gmail codes)
-```
+## 🔐 Reusing your existing Chrome login
 
-- **Role analyzer** reads your resume closely and writes a detailed
-  `candidate_brief.md` (domain, what you've built, technologies, level) plus
-  precise **search keywords** — so the search agent looks for *your*
-  specialization, not "software engineer" in general. View it with
-  `job-hunter brief`.
-- **Relevance filter** scores every scraped job against your profile and drops
-  off-target results (the reason shows as *"low relevance to your profile"*).
-  Tune the cutoff with `JOBHUNTER_MIN_RELEVANCE` (default `0.22`).
-- It also *infers hard rules* (a current student is capped at entry-level).
-- **Constraints engine** is the safety gate: every job must satisfy **all** your
-  rules or it's skipped. Nothing that fails it is ever submitted.
-- **Application engine** answers questions from your profile first (free, exact),
-  falls back to the LLM for free-text, uploads your resume, and **pauses rather
-  than guessing** on required fields it can't answer confidently.
-- All state lives in `~/.jobhunter/` (profile, job DB, persistent browser
-  session, submission screenshots). Runs are resumable and de-duplicated.
-
-## Configuration
-
-Copy `.env.example` → `.env`. Everything is optional except a provider key for
-standalone runs.
-
-| Variable | Purpose |
-|----------|---------|
-| `ANTHROPIC_API_KEY` | Use Anthropic as the standalone brain |
-| `OPENAI_API_KEY` | Use OpenAI as the standalone brain |
-| `JOBHUNTER_PROVIDER` | Force `anthropic` or `openai` (else: whichever key is set) |
-| `JOBHUNTER_MODEL` | Override the default model |
-| `GMAIL_ADDRESS` / `GMAIL_APP_PASSWORD` | Auto-read signup verification codes ([App Password](https://myaccount.google.com/apppasswords), never your real password) |
-| `JOBHUNTER_HOME` | Where local state lives (default `~/.jobhunter`) |
-| `JOBHUNTER_MIN_RELEVANCE` | Relevance cutoff 0-1 for dropping off-target jobs (default `0.22`) |
-
-**Provider selection:** if you set both keys, Anthropic wins unless
-`JOBHUNTER_PROVIDER=openai`. Default models: `claude-sonnet-4-6` /
-`gpt-4o` (override with `JOBHUNTER_MODEL`).
-
-## Reusing your existing Chrome login
-
-By default the tool runs Chrome with an **isolated profile**
-(`~/.jobhunter/chrome-profile`) so it never conflicts with your everyday browser
-— you log into LinkedIn once. Chrome locks a profile to a single process, so it
-can't share your live default profile while your normal Chrome is open.
+By default the tool runs Chrome with an **isolated profile** so it never
+conflicts with your everyday browser — you log into LinkedIn once. Chrome locks a
+profile to one process, so it can't share your live default profile while your
+normal Chrome is open.
 
 To reuse your **already-logged-in** session, attach over CDP:
 
 ```bash
-# 1. Quit Chrome completely, then relaunch with a debugging port (macOS):
+# 1. Quit Chrome, relaunch with a debugging port (macOS):
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222
 # 2. Point the tool at it:
 export JOBHUNTER_CDP_URL=http://localhost:9222
 ```
 
-Now `job-hunter` drives your real browser/profile and **won't close it** on exit.
-Alternatively set `JOBHUNTER_CHROME_USER_DATA_DIR` + `JOBHUNTER_CHROME_PROFILE`
-to launch your real profile directly — but Chrome must be fully closed while it
-runs.
+It then drives your real profile and **won't close your browser** on exit.
 
-## Development
+---
+
+## 🗂️ Your data & privacy
+
+Everything is stored **locally** under `~/.jobhunter/` (override with
+`JOBHUNTER_HOME`): your profile, résumé text, candidate brief, the jobs database,
+the persistent browser session, and submission screenshots. The `jobs.xlsx`
+spreadsheet is written to the folder you run from. Nothing is sent anywhere
+except LinkedIn, your chosen LLM provider, and (if configured) Gmail.
+
+Wipe it any time:
+
+```bash
+job-hunter reset                 # delete everything (asks to confirm)
+job-hunter reset --keep-login    # keep only the LinkedIn session
+job-hunter reset --only jobs     # clear one scope: profile|jobs|session|artifacts|spreadsheet
+```
+
+---
+
+## ⚠️ Safety & limitations
+
+- **Terms of Service.** LinkedIn's User Agreement prohibits automated scraping and
+  applying. This tool drives *your own* logged-in Chrome at a human pace to reduce
+  risk, but using it can still get your account restricted or banned.
+- **Real submissions.** Autonomous mode submits real applications under your
+  identity. Start with `--limit 1` and check the `~/.jobhunter/artifacts/`
+  screenshots.
+- **Best-effort on hard cases.** Easy Apply is the reliable path; external sites
+  and Google Forms are best-effort and pause as `needs_input` rather than guess.
+- **Go slow.** Aggressive automation triggers LinkedIn's security checks. Keep
+  `--concurrency` low and `--max` modest.
+
+---
+
+## 🛠️ Development
 
 ```bash
 pip install -e ".[dev]"
-pytest          # fast, offline — no network/browser/API keys
+pytest              # fast, offline — no network, browser, or API keys
 ruff check .
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the project layout and guidelines.
+Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the project
+layout and guidelines.
 
-## Safety & limitations
+---
 
-- **Terms of Service.** LinkedIn's User Agreement prohibits automated scraping
-  and applying. This tool drives *your own* logged-in Chrome at a human pace to
-  reduce risk, but using it can still get your account restricted or banned.
-- **Real submissions.** Autonomous mode submits real applications under your
-  identity. Review your constraints, start with `--limit 1`, and check the
-  `~/.jobhunter/artifacts/` screenshots.
-- **Easy Apply is the reliable path.** External sites and Google Forms are
-  best-effort; anything the tool can't complete confidently is marked
-  `needs_input` for you to finish — it never fabricates answers on a real form.
-- **Selectors drift.** LinkedIn's markup changes often; scrapers use defensive
-  fallbacks but may occasionally need updates (PRs welcome).
-
-## License
+## 📄 License
 
 [MIT](LICENSE) © 2026 Akshath
