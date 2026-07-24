@@ -73,14 +73,20 @@ def check(job: Job, profile: Profile) -> tuple[bool, str | None]:
                 return False, f"requires ~{required}y experience (have {profile.years_experience})"
             break
 
-    # 5. Remote / location.
+    # 5. Work style (onsite / hybrid / remote acceptance).
     wp = (job.workplace_type or "").lower()
-    if c.remote_only and "remote" not in wp and "remote" not in (job.location or "").lower():
-        return False, "not remote"
+    wtypes = [w.lower() for w in c.workplace_types] or (["remote"] if c.remote_only else [])
+    if wtypes and "any" not in wtypes and wp:   # only filter when we know the style
+        if not any(w in wp for w in wtypes):
+            return False, f"work style '{job.workplace_type}' not acceptable ({wtypes})"
+
+    # 6. Location (city) with aliases; a remote job passes if remote is acceptable.
     if c.locations:
         loc_hay = f"{(job.location or '').lower()} {wp}"
-        allows_remote = any(_expand_location(loc) & {"remote"} for loc in c.locations)
-        ok = "remote" in loc_hay and allows_remote
+        remote_ok = "remote" in wtypes or any(
+            _expand_location(loc) & {"remote"} for loc in c.locations
+        )
+        ok = "remote" in loc_hay and remote_ok
         if not ok:
             for loc in c.locations:
                 if any(alias in loc_hay for alias in _expand_location(loc)):

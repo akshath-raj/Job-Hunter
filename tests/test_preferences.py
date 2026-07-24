@@ -49,10 +49,11 @@ def test_process_falls_back_without_llm(monkeypatch):
     monkeypatch.setattr(config, "has_llm", lambda: False)
     profile_mod.save(Profile())
     res = service.process_search_preferences(
-        {"salary": "20 LPA", "locations": "Bangalore", "remote": "yes", "additional": "no crypto"}
+        {"salary": "20 LPA", "locations": "Bangalore", "work_styles": "remote, hybrid",
+         "additional": "no crypto"}
     )
     assert res["processed"] is False
     p = profile_mod.load()
     assert p.search_context == "no crypto"          # raw additional details kept
-    assert p.constraints.remote_only is True
+    assert p.constraints.workplace_types == ["remote", "hybrid"]
     assert p.constraints.locations == ["Bangalore"]

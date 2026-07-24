@@ -88,7 +88,7 @@ def process_search_preferences(raw: dict[str, str]) -> dict:
     profile_mod.set_search_preferences(
         prof, expected_salary=raw.get("salary") or None,
         locations=raw.get("locations") or None,
-        remote_only=bool(raw.get("remote")),
+        work_styles=raw.get("work_styles") or None,
         additional_details=raw.get("additional") or None,
     )
     profile_mod.save(prof)
@@ -105,7 +105,7 @@ def _append_prefs_to_brief(prof: Profile, raw: dict[str, str]) -> None:
     answers = {
         "Expected salary": raw.get("salary"),
         "Preferred locations": raw.get("locations"),
-        "Remote only": raw.get("remote"),
+        "Acceptable work styles": raw.get("work_styles"),
         "Additional details": raw.get("additional"),
     }
     kept = [f"- **{k}:** {v}" for k, v in answers.items() if v]
@@ -116,6 +116,41 @@ def _append_prefs_to_brief(prof: Profile, raw: dict[str, str]) -> None:
 
 
 # ---- search ---------------------------------------------------------------
+
+def _search_tasks(profile: Profile, queries: list[str], recent_days: int | None) -> list[dict]:
+    """Build search variations to discover MORE jobs.
+
+    For each keyword: one pass per preferred city (all-time, relevance), a remote
+    pass if remote is acceptable, and a 'newly posted' pass (last 7 days). This is
+    why a single search now covers Bengaluru AND Chennai AND remote, plus fresh
+    postings — not just the first location.
+    """
+    c = profile.constraints
+    locs = [loc_str for loc_str in c.locations if loc_str.strip()]
+    if not locs and profile.identity.location:
+        locs = [profile.identity.location]
+    city_locs = [loc_str for loc_str in locs if loc_str.lower() not in {"remote", "anywhere"}]
+    wtypes = [w.lower() for w in c.workplace_types]
+    wants_remote = (
+        any((loc_str or "").lower() in {"remote", "anywhere"} for loc_str in locs)
+        or "remote" in wtypes
+        or c.remote_only
+    )
+
+    tasks: list[dict] = []
+    for kw in queries[:6]:                       # cap keywords to bound total work
+        for loc_str in (city_locs or [None]):     # a pass per city (fixes single-city bug)
+            tasks.append({"kw": kw, "location": loc_str, "remote": False,
+                          "sort": "recent" if recent_days else "relevance",
+                          "recent_days": recent_days})
+        if wants_remote:                          # dedicated remote pass (no city)
+            tasks.append({"kw": kw, "location": None, "remote": True,
+                          "sort": "relevance", "recent_days": recent_days})
+        if not recent_days:                       # newly-posted variation
+            tasks.append({"kw": kw, "location": city_locs[0] if city_locs else None,
+                          "remote": False, "sort": "recent", "recent_days": 7})
+    return tasks
+
 
 async def search_jobs(
     profile: Profile,
@@ -147,38 +182,37 @@ async def search_jobs(
     if not queries:
         return {"error": "No search queries — analyze a resume or set target_roles first."}
 
-    c = profile.constraints
-    location = c.locations[0] if c.locations else profile.identity.location
     new_jobs: list[Job] = []
     total = 0
     skipped_seen = 0
     # Track ids so we never re-visit a job: those already in the DB (prior runs)
-    # plus those seen earlier in THIS run (a job can appear under many queries).
+    # plus those seen earlier in THIS run (a job can appear under many variations).
     seen_ids: set[str] = store.all_job_ids()
 
-    async def _scrape(session, query):
+    tasks = _search_tasks(profile, queries, recent_days)
+
+    async def _scrape(session, task):
         return await search.scrape_search(
-            session, query, location=location, easy_apply=easy_apply_only,
-            remote=c.remote_only, max_results=max_per_query,
-            date_posted_days=recent_days,
-            sort="recent" if recent_days else "relevance",
+            session, task["kw"], location=task["location"], easy_apply=easy_apply_only,
+            remote=task["remote"], max_results=max_per_query,
+            date_posted_days=task["recent_days"], sort=task["sort"],
         )
 
     async with browser.session(headless=headless) as s:
         if not await s.is_logged_in():
             return {"error": "Not logged into LinkedIn. Run `job-hunter login` first."}
-        for q in queries:
+        for task in tasks:
             try:
-                jobs = await _scrape(s, q)
+                jobs = await _scrape(s, task)
             except browser.SessionExpired:
                 # Session died mid-search. Wait for the user to re-login, then
-                # retry this query once. Everything found so far is already saved.
+                # retry this variation once. Everything found so far is saved.
                 if not await s.await_reauth():
                     return {"error": "linkedin_session_expired", "new": len(new_jobs),
                             "message": "LinkedIn logged you out / showed a security check "
                                        "mid-search. Log back in and re-run — saved jobs are "
                                        "kept and it resumes.", **store.counts_by_status()}
-                jobs = await _scrape(s, q)
+                jobs = await _scrape(s, task)
             for job in jobs:
                 total += 1
                 # Skip anything we've already handled — no repeat page visits,
@@ -220,8 +254,9 @@ async def search_jobs(
 
             await asyncio.gather(*(worker(j) for j in to_enrich))
 
-    result = {"queries": queries, "found": total, "new": len(new_jobs),
-              "skipped_already_seen": skipped_seen, **store.counts_by_status()}
+    result = {"queries": queries, "variations": len(tasks), "found": total,
+              "new": len(new_jobs), "skipped_already_seen": skipped_seen,
+              **store.counts_by_status()}
     if export:
         result["excel"] = export_excel()["path"]
     return result

@@ -43,7 +43,9 @@ class Constraints(BaseModel):
     max_seniority: Seniority | None = None      # e.g. student -> entry
     allowed_seniorities: list[Seniority] = Field(default_factory=list)
     locations: list[str] = Field(default_factory=list)   # e.g. ["Remote", "Bangalore"]
-    remote_only: bool = False
+    remote_only: bool = False                             # legacy; prefer workplace_types
+    # Acceptable work styles: subset of {"onsite","hybrid","remote"}. Empty = any.
+    workplace_types: list[str] = Field(default_factory=list)
     require_sponsorship: bool = False   # user needs visa sponsorship
     work_authorization: str | None = None   # e.g. "US Citizen", "F-1 OPT", "Indian citizen"
     exclude_companies: list[str] = Field(default_factory=list)

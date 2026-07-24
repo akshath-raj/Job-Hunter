@@ -116,12 +116,12 @@ def search(
         q = profile_mod.SEARCH_PREF_QUESTIONS
         salary = typer.prompt(q["expected salary"], default="")
         locations = typer.prompt(q["preferred locations"], default="")
-        remote = typer.confirm("Only remote roles?", default=False)
+        work_styles = typer.prompt(q["work styles"], default="any")
         additional = typer.prompt(q["additional details"], default="")
         console.print("[cyan]Processing your preferences...[/]")
         res = service.process_search_preferences({
             "salary": salary, "locations": locations,
-            "remote": "yes" if remote else "", "additional": additional,
+            "work_styles": work_styles, "additional": additional,
         })
         p = profile_mod.load()
         if res.get("search_context"):

@@ -34,8 +34,9 @@ PREF_INSTRUCTIONS = """Using the candidate brief and their answers, return ONLY 
 JSON object:
 {
   "expected_salary": string|null,  // normalized, e.g. "20 LPA" or "$120k"; null if not given
-  "locations": [string],           // clean list; include "Remote" if they want remote
-  "remote_only": boolean,
+  "locations": [string],           // clean city list (do NOT put "remote" here)
+  "workplace_types": [string],     // subset of ["remote","hybrid","onsite"] the user accepts;
+                                   // [] means any is fine
   "refined_keywords": [string],    // 4-8 EXACT LinkedIn search strings tailored to this
                                    // candidate's specialization and preferences
   "exclude_keywords": [string],    // deal-breakers to filter out (e.g. "unpaid", "clearance",
@@ -52,7 +53,7 @@ def build_prompt(brief: str, target_roles: list[str], raw: dict[str, str]) -> st
         f"THEIR ANSWERS:\n"
         f"- Expected salary: {raw.get('salary') or '(not given)'}\n"
         f"- Preferred locations: {raw.get('locations') or '(not given)'}\n"
-        f"- Remote only: {raw.get('remote') or 'no'}\n"
+        f"- Acceptable work styles: {raw.get('work_styles') or '(any)'}\n"
         f"- Additional details: {raw.get('additional') or '(none)'}\n\n"
         f"{PREF_INSTRUCTIONS}"
     )
@@ -73,8 +74,10 @@ def apply_processed(profile: Profile, data: dict[str, Any]) -> Profile:
         profile_mod.remember(profile, "expected salary", data["expected_salary"])
     if data.get("locations"):
         c.locations = [str(x) for x in data["locations"] if str(x).strip()]
-    if data.get("remote_only") is not None:
-        c.remote_only = bool(data["remote_only"])
+    if data.get("workplace_types") is not None:
+        c.workplace_types = [str(w).lower() for w in data["workplace_types"] if str(w).strip()]
+    elif data.get("remote_only"):   # backward compat
+        c.workplace_types = ["remote"]
     if data.get("refined_keywords"):
         # The résumé-derived keywords stay PRIMARY (they reflect what the
         # candidate actually does); refined ones are appended, never replacing.

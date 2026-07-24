@@ -160,12 +160,32 @@ def apply_extra(profile: Profile, answers: dict[str, str]) -> Profile:
 SEARCH_PREF_QUESTIONS = {
     "expected salary": "What's your expected salary / compensation? (e.g. '20 LPA', or blank)",
     "preferred locations": "Preferred job locations, comma-separated? (or blank for any)",
-    "remote only": "Only remote roles? (y/N)",
+    "work styles": "Which work styles are OK? (remote, hybrid, onsite — comma-separated, or 'any')",
     "additional details": (
         "Anything else the search agent should know? (company types, must-haves, "
         "deal-breakers, industries to avoid, etc. — or blank)"
     ),
 }
+
+_WORKSTYLE_ALIASES = {
+    "remote": "remote", "wfh": "remote", "work from home": "remote",
+    "hybrid": "hybrid",
+    "onsite": "onsite", "on-site": "onsite", "on site": "onsite", "office": "onsite",
+    "in-office": "onsite", "in office": "onsite",
+}
+
+
+def parse_work_styles(text: str | None) -> list[str]:
+    """'remote, hybrid' -> ['remote','hybrid']; 'any'/'' -> []."""
+    if not text or text.strip().lower() in {"any", "all"}:
+        return []
+    out: list[str] = []
+    for part in text.replace("/", ",").split(","):
+        key = part.strip().lower()
+        norm = _WORKSTYLE_ALIASES.get(key)
+        if norm and norm not in out:
+            out.append(norm)
+    return out
 
 
 def needs_search_preferences(profile: Profile) -> bool:
@@ -177,6 +197,7 @@ def set_search_preferences(
     expected_salary: str | None = None,
     locations: str | list[str] | None = None,
     remote_only: bool | None = None,
+    work_styles: str | list[str] | None = None,
     additional_details: str | None = None,
     search_context: str | None = None,
 ) -> Profile:
@@ -189,6 +210,9 @@ def set_search_preferences(
         ]
         if locs:
             profile.constraints.locations = locs
+    if work_styles is not None:
+        ws = work_styles if isinstance(work_styles, list) else parse_work_styles(work_styles)
+        profile.constraints.workplace_types = [w.lower() for w in ws]
     if remote_only is not None:
         profile.constraints.remote_only = remote_only
     # Prefer a processed context; otherwise keep the user's raw additional notes.

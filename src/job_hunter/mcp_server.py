@@ -155,7 +155,7 @@ def search_preferences_needed() -> dict[str, Any]:
 def set_search_preferences(
     expected_salary: str = "",
     locations: list[str] | None = None,
-    remote_only: bool = False,
+    workplace_types: list[str] | None = None,
     refined_keywords: list[str] | None = None,
     exclude_keywords: list[str] | None = None,
     search_context: str = "",
@@ -165,10 +165,9 @@ def set_search_preferences(
 
     You are the brain here: after reading the candidate brief and the user's
     answers (including their free-text "additional details"), YOU produce the
-    strategy and pass it in — `refined_keywords` (exact LinkedIn search strings
-    for their specialization), `exclude_keywords` (deal-breakers), and a tight
-    `search_context` paragraph. `additional_details` (raw) is stored as context
-    if you don't supply `search_context`.
+    strategy and pass it in — `refined_keywords` (exact LinkedIn search strings),
+    `workplace_types` (subset of remote/hybrid/onsite they accept; [] = any),
+    `exclude_keywords` (deal-breakers), and a tight `search_context` paragraph.
     """
     from . import preferences
 
@@ -176,7 +175,7 @@ def set_search_preferences(
     preferences.apply_processed(prof, {
         "expected_salary": expected_salary or None,
         "locations": locations,
-        "remote_only": remote_only,
+        "workplace_types": workplace_types,
         "refined_keywords": refined_keywords,
         "exclude_keywords": exclude_keywords,
         "search_context": search_context or additional_details or None,
