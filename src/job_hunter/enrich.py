@@ -87,23 +87,31 @@ def salary_in_text(text: str | None) -> str | None:
     return m.group(0).strip() if m else None
 
 
+# Scrape-friendly search endpoints, tried in order until one returns text.
+_ENGINES = [
+    ("https://duckduckgo.com/html/?q={q}", ".result__snippet, .result__title"),
+    ("https://html.duckduckgo.com/html/?q={q}", ".result__snippet, .result__title"),
+    ("https://www.bing.com/search?q={q}", "li.b_algo, .b_caption p, .b_algo h2"),
+    ("https://lite.duckduckgo.com/lite/?q={q}", "td, a"),
+]
+
+
 async def _search_snippets(context, query: str) -> str:
-    """Fetch result snippets from a scrape-friendly search engine (DuckDuckGo)."""
-    page = await context.new_page()
-    try:
-        await page.goto(
-            f"https://duckduckgo.com/html/?q={quote_plus(query)}",
-            wait_until="domcontentloaded",
-        )
-        els = await page.query_selector_all(".result__snippet, .result__title")
-        texts = []
-        for e in els[:8]:
-            texts.append((await e.inner_text()).strip())
-        return "\n".join(t for t in texts if t)
-    except Exception:  # noqa: BLE001 — search blocked/unreachable
-        return ""
-    finally:
-        await page.close()
+    """Fetch result snippets from a search engine, trying several for resilience."""
+    for url_tpl, selector in _ENGINES:
+        page = await context.new_page()
+        try:
+            await page.goto(url_tpl.format(q=quote_plus(query)), wait_until="domcontentloaded")
+            els = await page.query_selector_all(selector)
+            texts = [(await e.inner_text()).strip() for e in els[:10]]
+            joined = "\n".join(t for t in texts if t)
+            if joined.strip():
+                return joined
+        except Exception:  # noqa: BLE001 — engine blocked/unreachable, try next
+            pass
+        finally:
+            await page.close()
+    return ""
 
 
 def _salary_queries(job: Job) -> list[str]:

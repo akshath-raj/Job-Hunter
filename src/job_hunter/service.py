@@ -198,10 +198,13 @@ async def search_jobs(
             date_posted_days=task["recent_days"], sort=task["sort"],
         )
 
+    target = max_per_query   # treat --max as a total target: keep going until we hit it
     async with browser.session(headless=headless) as s:
         if not await s.is_logged_in():
             return {"error": "Not logged into LinkedIn. Run `job-hunter login` first."}
         for task in tasks:
+            if len(new_jobs) >= target:
+                break
             try:
                 jobs = await _scrape(s, task)
             except browser.SessionExpired:
@@ -227,12 +230,19 @@ async def search_jobs(
                     except Exception:  # noqa: BLE001
                         pass
                 constraints.annotate(job, profile)
-                relevance.annotate(job, profile)   # drop off-target jobs (keyword scorer)
+                relevance.annotate(job, profile)   # tag off-target (kept, not dropped)
                 if store.upsert_job(job):
                     new_jobs.append(job)
+                if len(new_jobs) >= target:
+                    break
 
-        # LLM cross-check: catch off-field jobs the keyword scorer missed
-        # (the "checking agent" that vets what goes into the spreadsheet).
+        # Phase 1: write the sheet immediately with EVERY job found (even before
+        # enrichment / salary), so nothing is ever hidden.
+        if export:
+            export_excel()
+
+        # LLM cross-check: tag off-field jobs the keyword scorer missed. These are
+        # NOT removed — they stay in the sheet, just marked ineligible with a reason.
         eligible_new = [j for j in new_jobs if j.status == JobStatus.eligible]
         off_target = relevance.llm_filter(profile, eligible_new, candidate_brief())
         for job in eligible_new:
@@ -241,9 +251,8 @@ async def search_jobs(
                 job.ineligible_reason = "LLM check: outside your field/level"
                 store.update_job(job)
 
-        # Enrich the jobs that will actually be in the sheet (skip rejected ones).
-        to_enrich = [j for j in new_jobs if j.status == JobStatus.eligible]
-        if enrich and to_enrich:
+        # Phase 2: enrich ALL found jobs (salary, culture, flags) — best effort.
+        if enrich and new_jobs:
             use_llm = config.has_llm()
             sem = asyncio.Semaphore(max(1, concurrency))
 
@@ -254,13 +263,13 @@ async def search_jobs(
                     )
                 store.update_job(job)
 
-            await asyncio.gather(*(worker(j) for j in to_enrich))
+            await asyncio.gather(*(worker(j) for j in new_jobs))
 
     result = {"queries": queries, "variations": len(tasks), "found": total,
               "new": len(new_jobs), "skipped_already_seen": skipped_seen,
-              **store.counts_by_status()}
+              "llm_enrichment": config.has_llm(), **store.counts_by_status()}
     if export:
-        result["excel"] = export_excel()["path"]
+        result["excel"] = export_excel()["path"]     # Phase 3: rewrite with details
     return result
 
 
@@ -415,13 +424,14 @@ async def enrich_jobs(job_ids: list[str] | None = None, limit: int = 25,
 
 
 def export_excel(status: JobStatus | None = None, path: str | None = None,
-                 include_ineligible: bool = False) -> dict:
-    """Write jobs to an .xlsx, best matches first. Off-target (ineligible/skipped)
-    jobs are excluded by default so the sheet only shows relevant roles."""
+                 eligible_only: bool = False) -> dict:
+    """Write jobs to an .xlsx — EVERYTHING found by default (so nothing is hidden),
+    best matches first. Ineligible jobs are kept but sink to the bottom with their
+    reason in the Status/Why columns. Pass eligible_only=True to hide off-target."""
     from . import export
 
-    jobs = store.list_jobs(status=status, limit=1000)
-    if status is None and not include_ineligible:
+    jobs = store.list_jobs(status=status, limit=2000)
+    if status is None and eligible_only:
         jobs = [j for j in jobs if j.status not in {JobStatus.ineligible, JobStatus.skipped}]
     # Eligible/relevant first, then by match score (best fit at the top).
     jobs.sort(key=lambda j: (j.status != JobStatus.eligible, -(j.match_score or 0.0)))

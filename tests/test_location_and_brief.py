@@ -63,7 +63,7 @@ def test_brief_append_preserves_resume(tmp_home):
 
 # ---- excel excludes off-target jobs ---------------------------------------
 
-def test_export_excludes_ineligible(make_job):
+def test_export_includes_all_but_eligible_first(make_job):
     good = make_job("ML Engineer")
     good.status = JobStatus.eligible
     good.match_score = 0.8
@@ -71,5 +71,7 @@ def test_export_excludes_ineligible(make_job):
     bad.status = JobStatus.ineligible
     store.upsert_job(good)
     store.upsert_job(bad)
-    res = service.export_excel()
-    assert res["rows"] == 1                            # only the eligible one
+    # Default: show EVERYTHING found (nothing hidden).
+    assert service.export_excel()["rows"] == 2
+    # Opt-in: hide off-target.
+    assert service.export_excel(eligible_only=True)["rows"] == 1

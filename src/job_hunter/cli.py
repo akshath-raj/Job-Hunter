@@ -136,6 +136,10 @@ def search(
     console.print_json(data=res)
     if res.get("excel"):
         console.print(f"[green]📊 Spreadsheet written:[/] {res['excel']}")
+    if res.get("llm_enrichment") is False:
+        console.print("[yellow]Note: no LLM provider set — salary/culture research is "
+                      "limited. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in .env for full "
+                      "web-researched details.[/]")
 
 
 @app.command()

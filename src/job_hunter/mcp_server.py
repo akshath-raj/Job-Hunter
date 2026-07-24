@@ -281,10 +281,12 @@ def set_job_enrichment(job_id: str, about: str = "", salary: str = "",
 
 
 @mcp.tool()
-def export_excel(status: str | None = None, path: str | None = None) -> dict[str, Any]:
-    """Write jobs (optionally filtered by status) to an Excel workbook. Returns the path."""
+def export_excel(status: str | None = None, path: str | None = None,
+                 eligible_only: bool = False) -> dict[str, Any]:
+    """Write jobs to Excel (ALL found by default, best matches first). Returns the
+    path. eligible_only=True hides off-target jobs."""
     st = JobStatus(status) if status else None
-    return service.export_excel(status=st, path=path)
+    return service.export_excel(status=st, path=path, eligible_only=eligible_only)
 
 
 # ---- ask-once memory ------------------------------------------------------
