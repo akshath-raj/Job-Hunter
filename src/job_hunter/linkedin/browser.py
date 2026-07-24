@@ -1,10 +1,18 @@
 """A persistent, human-paced browser session.
 
 Design choices that matter for not getting your LinkedIn account flagged:
-  * Persistent context bound to a real Chrome profile under JOBHUNTER_HOME, so
-    you log in ONCE (and cookies/2FA survive across runs).
-  * Non-headless by default — you can watch it, and CAPTCHAs are solvable.
+  * Real Chrome (channel="chrome"), non-headless by default — you can watch it
+    and solve CAPTCHAs/2FA.
   * `human_pause()` jitter between actions instead of machine-gun speed.
+
+Three profile modes (see config.py):
+  * default  — isolated profile under JOBHUNTER_HOME; log in ONCE, no conflict
+               with your everyday Chrome (Chrome locks a profile to one process).
+  * CDP      — attach to a Chrome you already started with a debugging port, so
+               it reuses your live login and real profile. We disconnect on exit
+               WITHOUT closing your browser.
+  * data-dir — launch against your real Chrome user-data-dir + named profile
+               (Chrome must be fully closed first).
 
 This same session is reused for LinkedIn search, Easy Apply, and any external
 career site or Google Form we navigate to.
@@ -35,6 +43,8 @@ class Session:
     def __init__(self, headless: bool = False):
         self.headless = headless
         self._pw = None
+        self._browser = None          # set only in CDP mode
+        self._owns_context = True      # False when attached to the user's browser
         self.context = None
         self.page = None
 
@@ -43,14 +53,39 @@ class Session:
 
         config.ensure_dirs()
         self._pw = await async_playwright().start()
+
+        cdp = config.cdp_url()
+        if cdp:
+            await self._attach_cdp(cdp)
+        else:
+            await self._launch_persistent()
+
+        self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+        return self
+
+    async def _attach_cdp(self, cdp: str) -> None:
+        """Reuse a Chrome the user already started with --remote-debugging-port."""
+        self._browser = await self._pw.chromium.connect_over_cdp(cdp)
+        self.context = (
+            self._browser.contexts[0]
+            if self._browser.contexts
+            else await self._browser.new_context()
+        )
+        self._owns_context = False  # never close the user's own browser/tabs
+
+    async def _launch_persistent(self) -> None:
         # channel="chrome" uses the real installed Chrome, which is far less
         # detectable than bundled Chromium. Falls back if unavailable.
+        args = ["--disable-blink-features=AutomationControlled"]
+        profile_dir = config.chrome_profile_directory()
+        if profile_dir:
+            args.append(f"--profile-directory={profile_dir}")
         launch_kwargs = dict(
-            user_data_dir=str(config.BROWSER_PROFILE_DIR),
+            user_data_dir=config.chrome_user_data_dir(),
             headless=self.headless,
             user_agent=_UA,
             viewport={"width": 1280, "height": 900},
-            args=["--disable-blink-features=AutomationControlled"],
+            args=args,
         )
         try:
             self.context = await self._pw.chromium.launch_persistent_context(
@@ -59,13 +94,12 @@ class Session:
         except Exception:  # noqa: BLE001 — chrome channel not present
             self.context = await self._pw.chromium.launch_persistent_context(**launch_kwargs)
 
-        self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
-        return self
-
     async def __aexit__(self, *exc) -> None:
         try:
-            if self.context:
-                await self.context.close()
+            if self._owns_context and self.context:
+                await self.context.close()      # we launched it -> we close it
+            elif self._browser:
+                await self._browser.close()      # CDP: disconnect, leaves Chrome running
         finally:
             if self._pw:
                 await self._pw.stop()

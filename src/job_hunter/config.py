@@ -74,3 +74,26 @@ def model_for(provider: str) -> str:
 def has_llm() -> bool:
     """True if any provider is usable — i.e. standalone reasoning is possible."""
     return bool(anthropic_key() or openai_key())
+
+
+# --- browser session options ----------------------------------------------
+# By default we launch a real Chrome with an isolated profile under
+# JOBHUNTER_HOME (log in once, no conflict with your everyday Chrome).
+# Two opt-in overrides let you reuse your *existing* login instead:
+#
+#   JOBHUNTER_CDP_URL              attach to an already-running Chrome started
+#                                  with --remote-debugging-port (uses that live
+#                                  browser + real profile; no lock conflict).
+#   JOBHUNTER_CHROME_USER_DATA_DIR launch against your real Chrome data dir
+#   JOBHUNTER_CHROME_PROFILE       + a named profile (e.g. "Default").
+#                                  Requires Chrome to be fully closed first.
+def cdp_url() -> str | None:
+    return os.environ.get("JOBHUNTER_CDP_URL") or None
+
+
+def chrome_user_data_dir() -> str:
+    return os.environ.get("JOBHUNTER_CHROME_USER_DATA_DIR") or str(BROWSER_PROFILE_DIR)
+
+
+def chrome_profile_directory() -> str | None:
+    return os.environ.get("JOBHUNTER_CHROME_PROFILE") or None

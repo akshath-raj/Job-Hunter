@@ -139,6 +139,27 @@ standalone runs.
 `JOBHUNTER_PROVIDER=openai`. Default models: `claude-sonnet-4-6` /
 `gpt-4o` (override with `JOBHUNTER_MODEL`).
 
+## Reusing your existing Chrome login
+
+By default the tool runs Chrome with an **isolated profile**
+(`~/.jobhunter/chrome-profile`) so it never conflicts with your everyday browser
+— you log into LinkedIn once. Chrome locks a profile to a single process, so it
+can't share your live default profile while your normal Chrome is open.
+
+To reuse your **already-logged-in** session, attach over CDP:
+
+```bash
+# 1. Quit Chrome completely, then relaunch with a debugging port (macOS):
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222
+# 2. Point the tool at it:
+export JOBHUNTER_CDP_URL=http://localhost:9222
+```
+
+Now `job-hunter` drives your real browser/profile and **won't close it** on exit.
+Alternatively set `JOBHUNTER_CHROME_USER_DATA_DIR` + `JOBHUNTER_CHROME_PROFILE`
+to launch your real profile directly — but Chrome must be fully closed while it
+runs.
+
 ## Development
 
 ```bash
