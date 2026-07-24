@@ -79,10 +79,41 @@ def check(job: Job, profile: Profile) -> tuple[bool, str | None]:
         return False, "not remote"
     if c.locations:
         loc_hay = f"{(job.location or '').lower()} {wp}"
-        if not any(loc.lower() in loc_hay or "remote" in wp for loc in c.locations):
+        allows_remote = any(_expand_location(loc) & {"remote"} for loc in c.locations)
+        ok = "remote" in loc_hay and allows_remote
+        if not ok:
+            for loc in c.locations:
+                if any(alias in loc_hay for alias in _expand_location(loc)):
+                    ok = True
+                    break
+        if not ok:
             return False, f"location '{job.location}' not in {c.locations}"
 
     return True, None
+
+
+# City/region aliases so "Bangalore" matches "Bengaluru, Karnataka, India", etc.
+_LOCATION_ALIASES: dict[str, set[str]] = {
+    "bangalore": {"bangalore", "bengaluru"},
+    "bengaluru": {"bangalore", "bengaluru"},
+    "mumbai": {"mumbai", "bombay"},
+    "bombay": {"mumbai", "bombay"},
+    "delhi": {"delhi", "new delhi", "ncr", "gurgaon", "gurugram", "noida"},
+    "gurgaon": {"gurgaon", "gurugram"},
+    "gurugram": {"gurgaon", "gurugram"},
+    "hyderabad": {"hyderabad", "secunderabad"},
+    "pune": {"pune", "poona"},
+    "kolkata": {"kolkata", "calcutta"},
+    "chennai": {"chennai", "madras"},
+    "bengaluru/bangalore": {"bangalore", "bengaluru"},
+    "remote": {"remote", "anywhere", "work from home", "wfh"},
+    "anywhere": {"remote", "anywhere"},
+}
+
+
+def _expand_location(loc: str) -> set[str]:
+    key = loc.strip().lower()
+    return _LOCATION_ALIASES.get(key, {key})
 
 
 def annotate(job: Job, profile: Profile) -> Job:

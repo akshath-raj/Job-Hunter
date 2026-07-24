@@ -66,8 +66,12 @@ It runs two ways from one codebase:
   contact) and writes a detailed `candidate_brief.md` describing what you do.
 - **Relevant search** — derives precise search keywords for *your* specialization
   and filters out off-target results with a relevance score.
-- **Salary research** — when a posting omits pay, a parallel agent looks it up on
-  the web (Glassdoor / Levels.fyi).
+- **Salary research** — when a posting omits pay, a parallel agent sweeps
+  multiple sources (Glassdoor, Levels.fyi, AmbitionBox, Payscale) and reconciles
+  them.
+- **Relevance checking** — a keyword scorer *plus* an LLM cross-check vet every
+  job against your résumé brief, so off-field roles (HR, content, sales) are
+  dropped before they reach the spreadsheet.
 - **Spreadsheet** — every search writes a `jobs.xlsx` with company, salary,
   qualifications, and link.
 - **Two apply modes** — fully autonomous, or human-in-the-loop (you pick from the list).

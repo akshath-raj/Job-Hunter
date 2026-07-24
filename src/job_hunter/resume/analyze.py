@@ -83,7 +83,11 @@ def build_prompt(resume_text: str, description: str | None) -> str:
 
 def analyze(resume_text: str, description: str | None = None) -> dict[str, Any]:
     """Standalone path: run the analysis through the LLM."""
-    return llm.complete_json(ANALYSIS_SYSTEM, build_prompt(resume_text, description))
+    # Generous token budget: the detailed brief + extracted details must not be
+    # truncated (a cut-off brief produces broken JSON / half sentences).
+    return llm.complete_json(
+        ANALYSIS_SYSTEM, build_prompt(resume_text, description), max_tokens=4000
+    )
 
 
 def _coerce_seniority(value: str | None) -> Seniority | None:
@@ -95,16 +99,41 @@ def _coerce_seniority(value: str | None) -> Seniority | None:
         return None
 
 
+_SEARCH_START = "<!-- search-preferences:start -->"
+_SEARCH_END = "<!-- search-preferences:end -->"
+
+
 def persist_brief(data: dict[str, Any]) -> str | None:
-    """Write the detailed candidate brief to candidate_brief.md. Returns its path."""
+    """Write the résumé brief to candidate_brief.md, preserving any appended
+    search-preferences section (we only replace the résumé part)."""
     from .. import config
 
     brief = (data.get("brief") or "").strip()
     if not brief:
         return None
     config.ensure_dirs()
-    config.BRIEF_PATH.write_text(brief)
+
+    # Keep an existing search-preferences section if present.
+    search_section = ""
+    if config.BRIEF_PATH.exists():
+        old = config.BRIEF_PATH.read_text()
+        if _SEARCH_START in old:
+            search_section = "\n\n" + _SEARCH_START + old.split(_SEARCH_START, 1)[1]
+    config.BRIEF_PATH.write_text(brief + search_section)
     return str(config.BRIEF_PATH)
+
+
+def update_brief_search_section(section_md: str) -> None:
+    """Append/replace the search-preferences section WITHOUT touching the résumé
+    brief above it — so the user's answers are added, never overwriting."""
+    from .. import config
+
+    config.ensure_dirs()
+    base = config.BRIEF_PATH.read_text() if config.BRIEF_PATH.exists() else ""
+    if _SEARCH_START in base:
+        base = base.split(_SEARCH_START, 1)[0].rstrip()
+    block = f"\n\n{_SEARCH_START}\n## Search preferences\n\n{section_md.strip()}\n{_SEARCH_END}\n"
+    config.BRIEF_PATH.write_text(base.rstrip() + block)
 
 
 def apply_analysis(profile: Profile, data: dict[str, Any]) -> Profile:

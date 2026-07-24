@@ -76,15 +76,16 @@ def apply_processed(profile: Profile, data: dict[str, Any]) -> Profile:
     if data.get("remote_only") is not None:
         c.remote_only = bool(data["remote_only"])
     if data.get("refined_keywords"):
-        # Refined keywords lead the search; keep prior ones as fallback, deduped.
+        # The résumé-derived keywords stay PRIMARY (they reflect what the
+        # candidate actually does); refined ones are appended, never replacing.
         refined = [str(k) for k in data["refined_keywords"] if str(k).strip()]
         seen: set[str] = set()
         merged = []
-        for k in refined + profile.search_keywords:
+        for k in [*profile.search_keywords, *refined]:
             if k.lower() not in seen:
                 seen.add(k.lower())
                 merged.append(k)
-        profile.search_keywords = merged
+        profile.search_keywords = merged[:8]
     if data.get("exclude_keywords"):
         existing = {e.lower() for e in c.exclude_keywords}
         for e in data["exclude_keywords"]:

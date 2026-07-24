@@ -67,3 +67,37 @@ def annotate(job: Job, profile: Profile) -> Job:
         job.status = JobStatus.ineligible
         job.ineligible_reason = f"low relevance to your profile (score {s})"
     return job
+
+
+def llm_filter(profile: Profile, jobs: list[Job], brief: str = "") -> set[str]:
+    """Cross-check jobs with an LLM against the candidate's field/level.
+
+    Catches off-target roles the keyword scorer misses (e.g. an "HR Intern" that
+    happened to mention "data"). Returns the set of job ids judged OFF-TARGET.
+    One cheap call over all titles; no-op if no LLM is configured.
+    """
+    if not jobs or not config.has_llm():
+        return set()
+    from . import llm
+
+    listing = "\n".join(f"{i}. {j.title} — {j.company}" for i, j in enumerate(jobs))
+    field = ", ".join(profile.domains or profile.target_roles or profile.search_keywords)
+    system = (
+        "You are a strict job-relevance checker. Given a candidate's field and a "
+        "list of jobs, flag every job that is clearly OUTSIDE the candidate's "
+        "field or level (e.g. HR, sales, content writing, or unrelated domains for "
+        "an ML/AI candidate). Be decisive; when a title is clearly a different "
+        "profession, flag it."
+    )
+    prompt = (
+        f"Candidate field: {field or 'unknown'}\n"
+        f"Candidate brief:\n{(brief or profile.summary or '')[:1500]}\n\n"
+        f"Jobs:\n{listing}\n\n"
+        'Return ONLY JSON: {"off_target": [indices of jobs to REJECT]}'
+    )
+    try:
+        data = llm.complete_json(system, prompt, max_tokens=400)
+    except Exception:  # noqa: BLE001 — checker is best-effort
+        return set()
+    idxs = data.get("off_target") or []
+    return {jobs[i].id for i in idxs if isinstance(i, int) and 0 <= i < len(jobs)}

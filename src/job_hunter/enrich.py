@@ -15,6 +15,7 @@ Two enrichment paths:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from urllib.parse import quote_plus
@@ -94,24 +95,41 @@ async def _search_snippets(context, query: str) -> str:
         await page.close()
 
 
+def _salary_queries(job: Job) -> list[str]:
+    """Several angles / sources — a mini deep-research sweep, not just Glassdoor."""
+    loc = job.location or ""
+    return [
+        f"{job.title} {job.company} {loc} salary",                 # general web
+        f"{job.title} {job.company} salary glassdoor OR levels.fyi",
+        f"{job.title} {job.company} salary ambitionbox OR payscale OR indeed",
+    ]
+
+
 async def research_salary(context, job: Job, use_llm: bool = True) -> tuple[str | None, str | None]:
-    """Web-search the salary for a role. Returns (salary, source) or (None, None)."""
-    query = f"{job.title} {job.company} {job.location or ''} salary glassdoor"
-    snippets = await _search_snippets(context, query)
+    """Web-research the salary across several sources. Returns (salary, source)."""
+    results = await asyncio.gather(
+        *(_search_snippets(context, q) for q in _salary_queries(job)),
+        return_exceptions=True,
+    )
+    snippets = "\n".join(s for s in results if isinstance(s, str) and s.strip())
     if not snippets.strip():
         return None, None
 
-    source = "web search (Glassdoor et al.)"
+    source = "web research (Glassdoor / Levels.fyi / AmbitionBox / Payscale)"
     if use_llm:
         try:
             from . import llm
 
             ans = llm.complete(
-                "From these web search snippets, extract the salary/compensation "
-                "range for the role. If none is present, reply exactly 'unknown'. "
-                "Otherwise reply with ONLY the range, prefixed 'est. '.",
-                f"Role: {job.title} at {job.company}\nSnippets:\n{snippets[:2500]}",
-                max_tokens=60,
+                "You are a compensation researcher. From these web search snippets "
+                "(multiple sources), infer the most credible salary/compensation "
+                "range for THIS role at THIS company/location. Prefer concrete "
+                "figures; reconcile conflicting sources sensibly. If nothing "
+                "usable is present, reply exactly 'unknown'. Otherwise reply with "
+                "ONLY the range, prefixed 'est. '.",
+                f"Role: {job.title} at {job.company} ({job.location or 'n/a'})\n"
+                f"Snippets:\n{snippets[:4000]}",
+                max_tokens=80,
             ).strip()
             if ans and "unknown" not in ans.lower():
                 return ans, source

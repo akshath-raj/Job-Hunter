@@ -78,6 +78,7 @@ def process_search_preferences(raw: dict[str, str]) -> dict:
             data = preferences.process(candidate_brief(), prof.target_roles, raw)
             preferences.apply_processed(prof, data)
             profile_mod.save(prof)
+            _append_prefs_to_brief(prof, raw)
             return {"processed": True, "search_context": prof.search_context,
                     "search_keywords": prof.search_keywords,
                     "locations": prof.constraints.locations,
@@ -91,8 +92,27 @@ def process_search_preferences(raw: dict[str, str]) -> dict:
         additional_details=raw.get("additional") or None,
     )
     profile_mod.save(prof)
+    _append_prefs_to_brief(prof, raw)
     return {"processed": False, "search_context": prof.search_context,
             "search_keywords": prof.search_keywords}
+
+
+def _append_prefs_to_brief(prof: Profile, raw: dict[str, str]) -> None:
+    """Add the search Q&A + derived strategy to the brief (never overwrites it)."""
+    lines = []
+    if prof.search_context:
+        lines.append(prof.search_context)
+    answers = {
+        "Expected salary": raw.get("salary"),
+        "Preferred locations": raw.get("locations"),
+        "Remote only": raw.get("remote"),
+        "Additional details": raw.get("additional"),
+    }
+    kept = [f"- **{k}:** {v}" for k, v in answers.items() if v]
+    if kept:
+        lines.append("\n".join(["", "**Your answers:**", *kept]))
+    if lines:
+        analyze.update_brief_search_section("\n\n".join(lines))
 
 
 # ---- search ---------------------------------------------------------------
@@ -159,13 +179,24 @@ async def search_jobs(
                     except Exception:  # noqa: BLE001
                         pass
                 constraints.annotate(job, profile)
-                relevance.annotate(job, profile)   # drop off-target jobs
+                relevance.annotate(job, profile)   # drop off-target jobs (keyword scorer)
                 if store.upsert_job(job):
                     new_jobs.append(job)
                 total += 1
 
-        # Enrich newly-found jobs concurrently (parallel salary-research tabs).
-        if enrich and new_jobs:
+        # LLM cross-check: catch off-field jobs the keyword scorer missed
+        # (the "checking agent" that vets what goes into the spreadsheet).
+        eligible_new = [j for j in new_jobs if j.status == JobStatus.eligible]
+        off_target = relevance.llm_filter(profile, eligible_new, candidate_brief())
+        for job in eligible_new:
+            if job.id in off_target:
+                job.status = JobStatus.ineligible
+                job.ineligible_reason = "LLM check: outside your field/level"
+                store.update_job(job)
+
+        # Enrich the jobs that will actually be in the sheet (skip rejected ones).
+        to_enrich = [j for j in new_jobs if j.status == JobStatus.eligible]
+        if enrich and to_enrich:
             use_llm = config.has_llm()
             sem = asyncio.Semaphore(max(1, concurrency))
 
@@ -174,7 +205,7 @@ async def search_jobs(
                     await enrich_mod.enrich_with_browser(s.context, job, use_llm=use_llm)
                 store.update_job(job)
 
-            await asyncio.gather(*(worker(j) for j in new_jobs))
+            await asyncio.gather(*(worker(j) for j in to_enrich))
 
     result = {"queries": queries, "found": total, "new": len(new_jobs),
               **store.counts_by_status()}
@@ -331,11 +362,17 @@ async def enrich_jobs(job_ids: list[str] | None = None, limit: int = 25,
     return {"enriched": len(jobs)}
 
 
-def export_excel(status: JobStatus | None = None, path: str | None = None) -> dict:
-    """Write the (optionally filtered) jobs to an .xlsx and return its path."""
+def export_excel(status: JobStatus | None = None, path: str | None = None,
+                 include_ineligible: bool = False) -> dict:
+    """Write jobs to an .xlsx, best matches first. Off-target (ineligible/skipped)
+    jobs are excluded by default so the sheet only shows relevant roles."""
     from . import export
 
     jobs = store.list_jobs(status=status, limit=1000)
+    if status is None and not include_ineligible:
+        jobs = [j for j in jobs if j.status not in {JobStatus.ineligible, JobStatus.skipped}]
+    # Eligible/relevant first, then by match score (best fit at the top).
+    jobs.sort(key=lambda j: (j.status != JobStatus.eligible, -(j.match_score or 0.0)))
     out = export.to_excel(jobs, path)
     return {"path": out, "rows": len(jobs)}
 

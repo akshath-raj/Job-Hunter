@@ -18,9 +18,10 @@ def test_apply_processed_merges_everything():
         "exclude_keywords": ["unpaid", "clearance"],
         "search_context": "Prioritize ML/CV roles at product companies.",
     })
-    # Refined keywords lead; prior ones kept as fallback.
-    assert p.search_keywords[:2] == ["ML Engineer", "Computer Vision Intern"]
-    assert "Old Keyword" in p.search_keywords
+    # Résumé-derived keywords stay primary; refined ones are appended.
+    assert p.search_keywords[0] == "Old Keyword"
+    assert "ML Engineer" in p.search_keywords
+    assert "Computer Vision Intern" in p.search_keywords
     assert p.constraints.locations == ["Bangalore", "Remote"]
     assert "unpaid" in p.constraints.exclude_keywords
     assert p.search_context.startswith("Prioritize ML/CV")
