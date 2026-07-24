@@ -10,6 +10,19 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+# Load a .env file so keys/provider set there "just work" without exporting.
+# Real exported env vars still win (override=False). We look in the current
+# working dir (and parents), then fall back to ~/.jobhunter/.env.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()  # cwd and parents
+    _home_env = Path.home() / ".jobhunter" / ".env"
+    if _home_env.exists():
+        load_dotenv(_home_env, override=False)
+except Exception:  # noqa: BLE001 — dotenv optional; never block on it
+    pass
+
 
 def _home() -> Path:
     override = os.environ.get("JOBHUNTER_HOME")
