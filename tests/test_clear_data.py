@@ -19,6 +19,7 @@ def _seed(make_job):
 
 def test_clear_all_removes_profile_and_jobs(make_job):
     _seed(make_job)
+    config.BRIEF_PATH.write_text("# brief\n<!-- search-preferences:start -->\nno crypto")
     assert config.PROFILE_PATH.exists()
     assert store.list_jobs()
 
@@ -26,6 +27,7 @@ def test_clear_all_removes_profile_and_jobs(make_job):
     assert res["count"] >= 1
     assert not config.PROFILE_PATH.exists()
     assert not config.RESUME_TEXT_PATH.exists()
+    assert not config.BRIEF_PATH.exists()   # brief (with stale search prefs) is gone
     assert store.list_jobs() == []          # db recreated empty on next access
 
 

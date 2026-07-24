@@ -396,7 +396,8 @@ def clear_data(
 ) -> dict:
     """Delete locally-stored data about the user. Each flag is independent.
 
-    profile     -> profile.json (identity, constraints, ask-once memory) + resume text
+    profile     -> profile.json (identity, constraints, ask-once memory), resume
+                   text, and candidate_brief.md (incl. search preferences)
     jobs        -> the jobs/applications database
     session     -> the LinkedIn browser session (logs you out)
     artifacts   -> submission screenshots + logs
@@ -423,6 +424,7 @@ def clear_data(
     if profile:
         rm(config.PROFILE_PATH)
         rm(config.RESUME_TEXT_PATH)
+        rm(config.BRIEF_PATH)          # candidate_brief.md (incl. search prefs section)
     if jobs:
         for p in (config.DB_PATH, Path(f"{config.DB_PATH}-wal"), Path(f"{config.DB_PATH}-shm")):
             rm(p)
