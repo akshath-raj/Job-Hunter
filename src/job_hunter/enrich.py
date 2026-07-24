@@ -52,8 +52,14 @@ _DEEP_SYS = (
     "You are a company & compensation research analyst. From a job posting plus web "
     "search snippets (salary sites and employee-review sites like Glassdoor, "
     "Levels.fyi, AmbitionBox, Indeed, Comparably), produce accurate, concise "
-    "details. ALWAYS state salary with its currency/country and make the currency "
-    "explicit for remote roles. Base culture/pros/cons on real employee reviews. "
+    "details.\n"
+    "ACCURACY IS PARAMOUNT — NEVER invent or guess:\n"
+    "- 'about' and 'qualifications': derive from the posting (always answerable).\n"
+    "- 'salary': report ONLY a figure found in the posting or the provided snippets, "
+    "WITH its currency/country (explicit for remote). If neither contains salary, "
+    "return \"\" — do NOT estimate from general knowledge.\n"
+    "- 'work_culture'/'pros'/'cons': ONLY from the review snippets. If none, return \"\".\n"
+    "It is far better to leave a field empty than to fill it with something wrong. "
     "Respond with ONLY the JSON asked for."
 )
 
@@ -159,6 +165,18 @@ async def research_salary(context, job: Job, use_llm: bool = True) -> tuple[str 
     return (f"est. {hit}", source) if hit else (None, None)
 
 
+def _llm_json_retry(system: str, prompt: str, max_tokens: int, attempts: int = 2) -> dict | None:
+    """Call the LLM for JSON, retrying transient failures. Returns None if all fail."""
+    from . import llm
+
+    for _ in range(attempts):
+        try:
+            return llm.complete_json(system, prompt, max_tokens=max_tokens)
+        except Exception:  # noqa: BLE001 — parse/network hiccup; retry then give up
+            continue
+    return None
+
+
 def _deep_queries(job: Job) -> list[str]:
     """A mini deep-research sweep across salary AND employee-review sources."""
     loc = job.location or ""
@@ -199,26 +217,33 @@ async def enrich_with_browser(context, job: Job, profile=None, use_llm: bool = T
 
     llm_concerns = None
     if use_llm:
-        try:
-            from . import llm
-
-            prompt = (
-                f"Job: {job.title} at {job.company}\n"
-                f"Location: {job.location or 'unknown'} "
-                f"(workplace: {job.workplace_type or 'n/a'})\n"
-                f"Salary in posting: {posted_salary or 'not stated'}\n"
-                f"Posting excerpt:\n{(job.description or '')[:1800]}\n"
-                f"{_requirements_block(profile)}\n"
-                f"Web search snippets (salary + reviews):\n{snippets[:4000]}\n\n"
-                f"{_INSTRUCTIONS}"
-            )
-            data = llm.complete_json(_DEEP_SYS, prompt, max_tokens=800)
+        prompt = (
+            f"Job: {job.title} at {job.company}\n"
+            f"Location: {job.location or 'unknown'} "
+            f"(workplace: {job.workplace_type or 'n/a'})\n"
+            f"Salary in posting: {posted_salary or 'not stated'}\n"
+            f"Posting excerpt:\n{(job.description or '')[:1800]}\n"
+            f"{_requirements_block(profile)}\n"
+            f"Web search snippets (salary + reviews):\n{snippets[:4000]}\n\n"
+            f"{_INSTRUCTIONS}"
+        )
+        data = _llm_json_retry(_DEEP_SYS, prompt, max_tokens=800)
+        if data:
             apply_enrichment(job, data)
             llm_concerns = data.get("concerns")
             if not job.enrichment_source:
                 job.enrichment_source = "web research (salary + review sites)"
-        except Exception:  # noqa: BLE001 — fall back to non-LLM salary handling
-            pass
+        # Guarantee posting-derived fields (always answerable from the description).
+        if job.description and (not job.about or not job.qualifications):
+            basic = _llm_json_retry(
+                "Summarize from the posting only. Respond with ONLY JSON.",
+                f"Job: {job.title} at {job.company}\nPosting:\n{job.description[:2500]}\n\n"
+                'Return {"about": string, "qualifications": string}.',
+                max_tokens=300,
+            )
+            if basic:
+                job.about = job.about or basic.get("about")
+                job.qualifications = job.qualifications or basic.get("qualifications")
 
     if not job.enriched:
         # No-LLM fallback: at least fill salary from the posting or a regex hit.

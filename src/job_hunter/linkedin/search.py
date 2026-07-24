@@ -80,7 +80,7 @@ async def scrape_search(
 
     jobs: dict[str, Job] = {}
     stale_scrolls = 0
-    while len(jobs) < max_results and stale_scrolls < 4:
+    while len(jobs) < max_results and stale_scrolls < 8:
         if await s.on_auth_wall():
             raise SessionExpired("LinkedIn session invalidated during search.")
         cards = await s.page.query_selector_all(
@@ -114,9 +114,19 @@ async def scrape_search(
                 title=title, company=company or "Unknown",
                 location=loc, easy_apply=easy_apply,
             )
-        # Scroll the results rail to load more.
-        await s.page.mouse.wheel(0, 1600)
-        await human_pause(1.0, 2.2)
+        # Scroll the results rail to lazy-load more, and click "See more jobs".
+        for _ in range(3):
+            await s.page.mouse.wheel(0, 2400)
+            await human_pause(0.4, 0.9)
+        more = await s.page.query_selector(
+            "button.infinite-scroller__show-more-button, button:has-text('See more jobs')"
+        )
+        if more and await more.is_visible():
+            try:
+                await more.click()
+            except Exception:  # noqa: BLE001
+                pass
+        await human_pause(1.0, 2.0)
         stale_scrolls = stale_scrolls + 1 if len(jobs) == before else 0
 
     return list(jobs.values())[:max_results]

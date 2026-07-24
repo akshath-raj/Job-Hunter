@@ -41,6 +41,28 @@ async def test_enrich_reads_salary_from_posting(make_job):
     assert job.enrichment_source == "job posting"
 
 
+def test_llm_json_retry_recovers(monkeypatch):
+    calls = {"n": 0}
+
+    def flaky(system, prompt, max_tokens):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ValueError("transient parse error")
+        return {"about": "ok"}
+
+    monkeypatch.setattr("job_hunter.llm.complete_json", flaky)
+    assert enrich._llm_json_retry("s", "p", 100) == {"about": "ok"}
+    assert calls["n"] == 2                       # retried once
+
+
+def test_llm_json_retry_gives_up(monkeypatch):
+    def always_fail(system, prompt, max_tokens):
+        raise ValueError("nope")
+
+    monkeypatch.setattr("job_hunter.llm.complete_json", always_fail)
+    assert enrich._llm_json_retry("s", "p", 100, attempts=2) is None
+
+
 async def test_enrich_falls_back_to_web(monkeypatch, make_job):
     async def fake_snippets(context, query):
         return "levels.fyi: total comp around $180k"
