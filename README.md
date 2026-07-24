@@ -57,21 +57,25 @@ Set a provider key in `.env` (see [Configuration](#configuration)), then:
 ```bash
 job-hunter run -r ~/resume.pdf -d "new-grad SWE, US only" --limit 5   # whole pipeline
 # or step by step:
-job-hunter onboard -r resume.pdf -d "…"   # analyze resume + ask 10th/12th marks etc. (once)
-job-hunter search                          # search LinkedIn, store jobs
-job-hunter enrich                          # research company/salary/quals (cheap subagents)
-job-hunter export                          # write jobs.xlsx to review
+job-hunter onboard -r resume.pdf -d "…"   # extract everything from resume; ask only what's missing
+job-hunter search                          # search + research salaries (Glassdoor) + write jobs.xlsx
 job-hunter jobs --status eligible          # review what passed your rules
 job-hunter apply --limit 5                 # AUTO: apply autonomously to top matches
 job-hunter apply --mode select             # HUMAN-IN-LOOP: list jobs, you pick which
 job-hunter apply --concurrency 3           # apply to several at once (bounded)
 ```
 
+**`search` builds the spreadsheet.** As it finds jobs it enriches them in
+parallel tabs — company summary, qualifications, and **salary researched on the
+web (Glassdoor/Levels.fyi) whenever the posting omits it** — then writes
+`~/.jobhunter/jobs.xlsx`.
+
 **Two apply modes:** `--mode auto` applies to your top eligible matches with no
-prompts; `--mode select` lists the enriched jobs and lets you choose exactly
-which to apply to. Anything the resume didn't cover (10th/12th marks, CGPA,
-notice period) is asked **once** at onboarding and remembered across all future
-sessions — and reused to auto-answer application questions.
+prompts; `--mode select` lists the (already enriched) jobs and lets you choose
+exactly which to apply to. Details not on the resume: education marks/CGPA are
+extracted automatically; salary expectation/location/remote are asked **once** at
+first search; anything else is asked only if a specific application needs it —
+then remembered forever.
 
 ### As an MCP server for Claude Code
 

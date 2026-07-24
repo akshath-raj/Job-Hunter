@@ -1,0 +1,51 @@
+"""Salary extraction from postings and web-search research."""
+
+from __future__ import annotations
+
+import pytest
+
+from job_hunter import enrich
+
+
+@pytest.mark.parametrize("text,expected_substr", [
+    ("Base salary is $120,000 - $150,000 per year", "$120,000"),
+    ("Compensation: 20 LPA plus benefits", "20 LPA"),
+    ("We offer ₹15,00,000 to ₹25,00,000", "₹15,00,000"),
+    ("Great team, no pay listed", None),
+])
+def test_salary_in_text(text, expected_substr):
+    got = enrich.salary_in_text(text)
+    if expected_substr is None:
+        assert got is None
+    else:
+        assert got is not None and expected_substr in got
+
+
+async def test_research_salary_uses_web_snippets(monkeypatch, make_job):
+    async def fake_snippets(context, query):
+        assert "glassdoor" in query.lower()          # we target Glassdoor
+        return "Glassdoor estimate: $130,000 - $160,000 per year for this role"
+
+    monkeypatch.setattr(enrich, "_search_snippets", fake_snippets)
+    salary, source = await enrich.research_salary(None, make_job("SWE"), use_llm=False)
+    assert salary and "$130,000" in salary
+    assert source and "web" in source.lower()
+
+
+async def test_enrich_reads_salary_from_posting(make_job):
+    job = make_job("Backend Engineer")
+    job.description = "Role details... Salary: $95,000 - $110,000 a year. Apply now."
+    await enrich.enrich_with_browser(context=None, job=job, use_llm=False)
+    assert job.enriched is True
+    assert job.salary and "$95,000" in job.salary
+    assert job.enrichment_source == "job posting"
+
+
+async def test_enrich_falls_back_to_web(monkeypatch, make_job):
+    async def fake_snippets(context, query):
+        return "levels.fyi: total comp around $180k"
+
+    monkeypatch.setattr(enrich, "_search_snippets", fake_snippets)
+    job = make_job("Staff Engineer")            # no salary in description
+    await enrich.enrich_with_browser(context=object(), job=job, use_llm=False)
+    assert job.salary and "180" in job.salary

@@ -65,15 +65,26 @@ async def search_jobs(
     max_per_query: int = 25,
     fetch_details: bool = True,
     headless: bool = False,
+    enrich: bool = True,
+    concurrency: int = 3,
+    export: bool = True,
 ) -> dict:
-    """Search LinkedIn for each query, store new jobs, tag eligibility."""
+    """Search LinkedIn, store new jobs, tag eligibility, enrich, and write Excel.
+
+    Enrichment (company/salary/qualifications) runs in parallel tabs on the same
+    session — salary is web-searched when the posting omits it. `search` is the
+    command that produces the spreadsheet.
+    """
+    from . import config
+    from . import enrich as enrich_mod
+
     queries = queries or profile.search_queries()
     if not queries:
         return {"error": "No search queries — analyze a resume or set target_roles first."}
 
     c = profile.constraints
     location = c.locations[0] if c.locations else profile.identity.location
-    new_count = 0
+    new_jobs: list[Job] = []
     total = 0
     async with browser.session(headless=headless) as s:
         if not await s.is_logged_in():
@@ -91,9 +102,26 @@ async def search_jobs(
                         pass
                 constraints.annotate(job, profile)
                 if store.upsert_job(job):
-                    new_count += 1
+                    new_jobs.append(job)
                 total += 1
-    return {"queries": queries, "found": total, "new": new_count, **store.counts_by_status()}
+
+        # Enrich newly-found jobs concurrently (parallel salary-research tabs).
+        if enrich and new_jobs:
+            use_llm = config.has_llm()
+            sem = asyncio.Semaphore(max(1, concurrency))
+
+            async def worker(job: Job) -> None:
+                async with sem:
+                    await enrich_mod.enrich_with_browser(s.context, job, use_llm=use_llm)
+                store.update_job(job)
+
+            await asyncio.gather(*(worker(j) for j in new_jobs))
+
+    result = {"queries": queries, "found": total, "new": len(new_jobs),
+              **store.counts_by_status()}
+    if export:
+        result["excel"] = export_excel()["path"]
+    return result
 
 
 # ---- apply ----------------------------------------------------------------

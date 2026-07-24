@@ -104,9 +104,11 @@ def search(
         )
         profile_mod.save(p)
 
-    console.print("[cyan]Searching LinkedIn...[/]")
+    console.print("[cyan]Searching LinkedIn + researching salaries (parallel)...[/]")
     res = _run(service.search_jobs(p, queries=query or None, max_per_query=max))
     console.print_json(data=res)
+    if res.get("excel"):
+        console.print(f"[green]📊 Spreadsheet written:[/] {res['excel']}")
 
 
 @app.command()
@@ -187,10 +189,9 @@ def run(
     max: int = typer.Option(25, "--max", "-m"),
     mode: str = typer.Option("auto", "--mode", help="'auto' or 'select'."),
 ):
-    """Full pipeline: onboard -> search -> enrich -> apply."""
+    """Full pipeline: onboard -> search (+enrich +Excel) -> apply."""
     onboard(resume=resume, description=description)
-    search(query=None, max=max)
-    enrich(limit=max)
+    search(query=None, max=max)   # also enriches and writes the spreadsheet
     apply(limit=limit, job=None, mode=mode, concurrency=2, no_llm=False)
 
 
