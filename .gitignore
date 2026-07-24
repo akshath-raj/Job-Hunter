@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.env
+# local user data (profile, resume cache, job db, browser session)
+.jobhunter/
+data/
+*.db

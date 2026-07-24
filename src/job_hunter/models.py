@@ -1,0 +1,131 @@
+"""Pydantic models — the shared vocabulary across agents, store, CLI, and MCP."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from enum import StrEnum
+
+from pydantic import BaseModel, Field
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+class Seniority(StrEnum):
+    """Coarse seniority ladder used for eligibility filtering."""
+
+    intern = "intern"
+    entry = "entry"          # new grad / junior
+    mid = "mid"
+    senior = "senior"
+    staff = "staff"          # staff/principal
+    lead = "lead"            # manager/director/lead
+    exec = "exec"
+
+
+SENIORITY_ORDER = [
+    Seniority.intern,
+    Seniority.entry,
+    Seniority.mid,
+    Seniority.senior,
+    Seniority.staff,
+    Seniority.lead,
+    Seniority.exec,
+]
+
+
+class Constraints(BaseModel):
+    """Hard rules an application MUST satisfy. Violations = skip, always."""
+
+    is_student: bool = False
+    graduation_date: str | None = None  # ISO date, if student
+    max_seniority: Seniority | None = None      # e.g. student -> entry
+    allowed_seniorities: list[Seniority] = Field(default_factory=list)
+    locations: list[str] = Field(default_factory=list)   # e.g. ["Remote", "Bangalore"]
+    remote_only: bool = False
+    require_sponsorship: bool = False   # user needs visa sponsorship
+    work_authorization: str | None = None   # e.g. "US Citizen", "F-1 OPT", "Indian citizen"
+    exclude_companies: list[str] = Field(default_factory=list)
+    exclude_keywords: list[str] = Field(default_factory=list)  # e.g. ["clearance", "PhD required"]
+    min_salary: int | None = None
+
+
+class UserIdentity(BaseModel):
+    """Personal details used to fill applications. Collected once at onboarding."""
+
+    full_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    location: str | None = None
+    linkedin_url: str | None = None
+    github_url: str | None = None
+    portfolio_url: str | None = None
+    resume_path: str | None = None
+
+
+class Profile(BaseModel):
+    """The complete user picture: who they are + what they want + hard rules."""
+
+    identity: UserIdentity = Field(default_factory=UserIdentity)
+    constraints: Constraints = Field(default_factory=Constraints)
+
+    # Derived from resume by the role-analyzer agent:
+    target_roles: list[str] = Field(default_factory=list)   # e.g. ["Backend Engineer"]
+    seniority: Seniority | None = None
+    skills: list[str] = Field(default_factory=list)
+    years_experience: float | None = None
+    summary: str | None = None       # one-paragraph pitch, reused in cover letters
+
+    # Free-text extra wishes from the user (the `description` param):
+    description: str | None = None
+
+    updated_at: str = Field(default_factory=_now)
+
+    def search_queries(self) -> list[str]:
+        """Reasonable LinkedIn search strings derived from target roles."""
+        return self.target_roles or (["software engineer"] if not self.summary else [])
+
+
+class JobStatus(StrEnum):
+    discovered = "discovered"
+    eligible = "eligible"
+    ineligible = "ineligible"
+    applying = "applying"
+    applied = "applied"
+    needs_input = "needs_input"     # paused, waiting on the user
+    failed = "failed"
+    skipped = "skipped"
+
+
+class Job(BaseModel):
+    id: str                     # stable hash of (source, external_id)
+    source: str = "linkedin"
+    external_id: str            # LinkedIn job id
+    url: str
+    title: str
+    company: str
+    location: str | None = None
+    workplace_type: str | None = None   # Remote / Hybrid / On-site
+    seniority_text: str | None = None   # raw text from posting
+    description: str | None = None
+    easy_apply: bool = False
+    posted_at: str | None = None
+
+    status: JobStatus = JobStatus.discovered
+    ineligible_reason: str | None = None
+    match_score: float | None = None    # 0-1, how well it fits the profile
+    discovered_at: str = Field(default_factory=_now)
+
+
+class Application(BaseModel):
+    job_id: str
+    status: JobStatus
+    submitted_at: str | None = None
+    method: str | None = None           # easy_apply / external_form / google_form
+    answers: dict[str, str] = Field(default_factory=dict)   # question -> answer log
+    screenshot_path: str | None = None
+    notes: str | None = None
+    needs_input_prompt: str | None = None   # what we need from the user, if paused
+    error: str | None = None
+    updated_at: str = Field(default_factory=_now)
