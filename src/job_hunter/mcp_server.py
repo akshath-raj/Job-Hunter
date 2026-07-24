@@ -279,6 +279,26 @@ def get_extra() -> dict[str, str]:
     return profile_mod.load().extra
 
 
+# ---- data deletion --------------------------------------------------------
+
+@mcp.tool()
+def clear_data(
+    profile: bool = True,
+    jobs: bool = True,
+    session: bool = True,
+    artifacts: bool = True,
+    spreadsheet: bool = True,
+) -> dict[str, Any]:
+    """Permanently delete locally-stored data about the user (DESTRUCTIVE).
+
+    Confirm with the user before calling. Each flag is independent:
+    profile (identity + ask-once memory + resume text), jobs (database),
+    session (LinkedIn login), artifacts (screenshots/logs), spreadsheet (xlsx).
+    """
+    return service.clear_data(profile=profile, jobs=jobs, session=session,
+                              artifacts=artifacts, spreadsheet=spreadsheet)
+
+
 @mcp.tool()
 def pending_input_jobs() -> list[dict[str, Any]]:
     """Jobs paused waiting on the user (a question we couldn't answer, a CAPTCHA, etc.)."""

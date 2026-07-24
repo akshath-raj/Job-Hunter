@@ -63,6 +63,9 @@ job-hunter jobs --status eligible          # review what passed your rules
 job-hunter apply --limit 5                 # AUTO: apply autonomously to top matches
 job-hunter apply --mode select             # HUMAN-IN-LOOP: list jobs, you pick which
 job-hunter apply --concurrency 3           # apply to several at once (bounded)
+job-hunter reset                           # delete ALL stored data about you (asks to confirm)
+job-hunter reset --keep-login              # wipe everything except the LinkedIn session
+job-hunter reset --only jobs               # clear just one: profile|jobs|session|artifacts|spreadsheet
 ```
 
 **`search` builds the spreadsheet.** As it finds jobs it enriches them in

@@ -163,6 +163,38 @@ def apply(
 
 
 @app.command()
+def reset(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    keep_login: bool = typer.Option(False, "--keep-login", help="Keep the LinkedIn session."),
+    only: str = typer.Option(
+        None, "--only",
+        help="Clear just one: profile | jobs | session | artifacts | spreadsheet.",
+    ),
+):
+    """Delete data stored about you (profile, jobs, browser session, screenshots)."""
+    scopes = {"profile": True, "jobs": True, "session": True,
+              "artifacts": True, "spreadsheet": True}
+    if only:
+        if only not in scopes:
+            console.print(f"[red]--only must be one of {list(scopes)}[/]")
+            raise typer.Exit(1)
+        scopes = {k: (k == only) for k in scopes}
+    if keep_login:
+        scopes["session"] = False
+
+    targets = [k for k, v in scopes.items() if v]
+    console.print(f"[yellow]This will permanently delete:[/] {', '.join(targets)}")
+    if not yes and not typer.confirm("Are you sure?", default=False):
+        console.print("Cancelled.")
+        raise typer.Exit()
+
+    res = service.clear_data(**scopes)
+    console.print(f"[green]Cleared {res['count']} item(s).[/]")
+    if scopes.get("session"):
+        console.print("[dim]You'll need to run [bold]job-hunter login[/] again.[/]")
+
+
+@app.command()
 def enrich(limit: int = typer.Option(25, "--limit", "-n", help="Jobs to enrich.")):
     """Research company/salary/qualifications for jobs (cheap research subagents)."""
     console.print("[cyan]Enriching jobs (this may hit the web for salaries)...[/]")

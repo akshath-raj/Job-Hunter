@@ -300,3 +300,56 @@ def remember_answers(answers: dict[str, str]) -> dict:
     profile_mod.apply_extra(prof, answers)
     profile_mod.save(prof)
     return {"saved": len(answers), "extra_keys": list(prof.extra.keys())}
+
+
+# ---- data deletion --------------------------------------------------------
+
+def clear_data(
+    profile: bool = True,
+    jobs: bool = True,
+    session: bool = True,
+    artifacts: bool = True,
+    spreadsheet: bool = True,
+) -> dict:
+    """Delete locally-stored data about the user. Each flag is independent.
+
+    profile     -> profile.json (identity, constraints, ask-once memory) + resume text
+    jobs        -> the jobs/applications database
+    session     -> the LinkedIn browser session (logs you out)
+    artifacts   -> submission screenshots + logs
+    spreadsheet -> generated jobs.xlsx (cwd and home)
+    """
+    import shutil
+    from pathlib import Path
+
+    from . import config
+
+    removed: list[str] = []
+
+    def rm(path: Path) -> None:
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+                removed.append(str(path))
+            elif path.exists():
+                path.unlink()
+                removed.append(str(path))
+        except Exception:  # noqa: BLE001 — best-effort deletion
+            pass
+
+    if profile:
+        rm(config.PROFILE_PATH)
+        rm(config.RESUME_TEXT_PATH)
+    if jobs:
+        for p in (config.DB_PATH, Path(f"{config.DB_PATH}-wal"), Path(f"{config.DB_PATH}-shm")):
+            rm(p)
+    if session:
+        rm(config.BROWSER_PROFILE_DIR)
+    if artifacts:
+        rm(config.ARTIFACTS_DIR)
+        rm(config.LOG_DIR)
+    if spreadsheet:
+        rm(Path.cwd() / "jobs.xlsx")
+        rm(config.HOME / "jobs.xlsx")
+
+    return {"removed": removed, "count": len(removed)}
