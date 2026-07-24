@@ -22,8 +22,11 @@ def job_id(source: str, external_id: str) -> str:
 
 
 def build_url(keywords: str, location: str | None = None, easy_apply: bool = True,
-              remote: bool = False, date_posted_days: int | None = None) -> str:
-    params: dict[str, str] = {"keywords": keywords, "sortBy": "DD"}  # DD = most recent
+              remote: bool = False, date_posted_days: int | None = None,
+              sort: str = "relevance") -> str:
+    # Default to relevance across ALL postings (no date filter) — older jobs are
+    # often the best matches. Pass sort="recent" / date_posted_days to narrow.
+    params: dict[str, str] = {"keywords": keywords, "sortBy": "DD" if sort == "recent" else "R"}
     if location:
         params["location"] = location
     if easy_apply:
@@ -66,9 +69,10 @@ async def scrape_search(
     easy_apply: bool = True,
     remote: bool = False,
     max_results: int = 25,
-    date_posted_days: int | None = 30,
+    date_posted_days: int | None = None,   # None = all postings, not just recent
+    sort: str = "relevance",
 ) -> list[Job]:
-    url = build_url(keywords, location, easy_apply, remote, date_posted_days)
+    url = build_url(keywords, location, easy_apply, remote, date_posted_days, sort)
     await s.page.goto(url, wait_until="domcontentloaded")
     await human_pause(1.5, 3.0)
     if await s.on_auth_wall():

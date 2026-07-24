@@ -98,8 +98,14 @@ def search(
     easy_only: bool = typer.Option(
         False, "--easy-only", help="Restrict to LinkedIn Easy Apply (default: all jobs)."
     ),
+    recent_days: int = typer.Option(
+        None, "--recent-days", help="Only jobs posted in the last N days (default: all)."
+    ),
+    headless: bool = typer.Option(
+        False, "--headless", help="Run without showing the browser window."
+    ),
 ):
-    """Search LinkedIn (broad — includes external-application jobs) and store them."""
+    """Search LinkedIn (broad — all jobs, by relevance) and store them."""
     p = profile_mod.load()
 
     # One-time: collect preferences that aren't on a resume, then LLM-process
@@ -125,6 +131,7 @@ def search(
     console.print("[cyan]Searching LinkedIn + researching salaries (parallel)...[/]")
     res = _run(service.search_jobs(
         p, queries=query or None, max_per_query=max, easy_apply_only=easy_only,
+        recent_days=recent_days, headless=headless,
     ))
     console.print_json(data=res)
     if res.get("excel"):
@@ -150,11 +157,12 @@ def apply(
     mode: str = typer.Option("auto", "--mode", help="'auto' or 'select' (human-in-the-loop)."),
     concurrency: int = typer.Option(2, "--concurrency", "-c", help="Parallel applications."),
     no_llm: bool = typer.Option(False, "--no-llm", help="Disable LLM answers (skip on unknowns)."),
+    headless: bool = typer.Option(False, "--headless", help="Run without showing the browser."),
 ):
     """Apply to jobs — fully autonomous ('auto') or pick-your-own ('select')."""
     p = profile_mod.load()
     if job:
-        res = _run(service.apply_single(p, job, use_llm=not no_llm))
+        res = _run(service.apply_single(p, job, use_llm=not no_llm, headless=headless))
         console.print_json(data=res)
         return
 
@@ -177,7 +185,7 @@ def apply(
 
     res = _run(service.apply_batch(
         p, limit=limit, mode=mode, selected_ids=selected_ids,
-        use_llm=not no_llm, concurrency=concurrency,
+        use_llm=not no_llm, concurrency=concurrency, headless=headless,
     ))
     console.print_json(data=res)
 

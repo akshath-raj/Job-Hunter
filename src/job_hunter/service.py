@@ -127,6 +127,7 @@ async def search_jobs(
     concurrency: int = 3,
     export: bool = True,
     easy_apply_only: bool = False,
+    recent_days: int | None = None,   # None = all postings, not just recent
 ) -> dict:
     """Search LinkedIn, store new jobs, tag eligibility, enrich, and write Excel.
 
@@ -159,6 +160,8 @@ async def search_jobs(
         return await search.scrape_search(
             session, query, location=location, easy_apply=easy_apply_only,
             remote=c.remote_only, max_results=max_per_query,
+            date_posted_days=recent_days,
+            sort="recent" if recent_days else "relevance",
         )
 
     async with browser.session(headless=headless) as s:

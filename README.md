@@ -230,7 +230,8 @@ you have?"*.
 | `onboard -r <resume> [-d <notes>]` | Analyze résumé → profile + brief; ask only missing required fields. |
 | `brief` | Print the detailed candidate brief the search agent uses. |
 | `profile` | Show the full stored profile as JSON. |
-| `search [--max N] [-q <query>]` | Search LinkedIn, research salaries, filter, write `jobs.xlsx`. |
+| `search [--max N] [-q <query>]` | Search LinkedIn (all jobs by relevance), research salaries, filter, write `jobs.xlsx`. |
+| `search --recent-days N` / `--headless` | Limit to recent postings / run without a visible browser. |
 | `jobs [--status <s>]` | List stored jobs (`eligible`, `ineligible`, `applied`, …). |
 | `enrich [--limit N]` | (Re)research company/salary/qualifications for stored jobs. |
 | `export [--status <s>] [--path <p>]` | Write jobs to an Excel spreadsheet. |
