@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from job_hunter import constraints, preferences, service, store
-from job_hunter.models import JobStatus, Profile
+from job_hunter.models import Profile
 from job_hunter.resume import analyze
 
 # ---- location aliases -----------------------------------------------------
@@ -65,13 +65,13 @@ def test_brief_append_preserves_resume(tmp_home):
 
 def test_export_includes_all_but_eligible_first(make_job):
     good = make_job("ML Engineer")
-    good.status = JobStatus.eligible
+    good.rag = "green"
     good.match_score = 0.8
     bad = make_job("HR Intern")
-    bad.status = JobStatus.ineligible
+    bad.rag = "red"
     store.upsert_job(good)
     store.upsert_job(bad)
     # Default: show EVERYTHING found (nothing hidden).
     assert service.export_excel()["rows"] == 2
-    # Opt-in: hide off-target.
+    # Opt-in: hide red (can't-apply) jobs.
     assert service.export_excel(eligible_only=True)["rows"] == 1

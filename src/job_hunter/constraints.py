@@ -55,15 +55,9 @@ def check(job: Job, profile: Profile) -> tuple[bool, str | None]:
             return False, f"contains excluded keyword ({kw})"
 
     # 3. Seniority ceiling — the core student-safety rule.
-    ceiling = c.max_seniority
-    if c.is_student and ceiling is None:
-        ceiling = Seniority.entry
-    job_level = infer_seniority(job)
-    if ceiling is not None and job_level is not None:
-        if _rank(job_level) > _rank(ceiling):
-            return False, f"seniority '{job_level.value}' above ceiling '{ceiling.value}'"
-    if c.allowed_seniorities and job_level is not None and job_level not in c.allowed_seniorities:
-        return False, f"seniority '{job_level.value}' not in allowed set"
+    ok, reason = seniority_ok(job, profile)
+    if not ok:
+        return False, reason
 
     # 4. Common hard experience gates in the description ("8+ years").
     if profile.years_experience is not None:
@@ -74,28 +68,54 @@ def check(job: Job, profile: Profile) -> tuple[bool, str | None]:
             break
 
     # 5. Work style (onsite / hybrid / remote acceptance).
-    wp = (job.workplace_type or "").lower()
-    wtypes = [w.lower() for w in c.workplace_types] or (["remote"] if c.remote_only else [])
-    if wtypes and "any" not in wtypes and wp:   # only filter when we know the style
-        if not any(w in wp for w in wtypes):
-            return False, f"work style '{job.workplace_type}' not acceptable ({wtypes})"
+    ok, reason = workstyle_ok(job, profile)
+    if not ok:
+        return False, reason
 
     # 6. Location (city) with aliases; a remote job passes if remote is acceptable.
-    if c.locations:
-        loc_hay = f"{(job.location or '').lower()} {wp}"
-        remote_ok = "remote" in wtypes or any(
-            _expand_location(loc) & {"remote"} for loc in c.locations
-        )
-        ok = "remote" in loc_hay and remote_ok
-        if not ok:
-            for loc in c.locations:
-                if any(alias in loc_hay for alias in _expand_location(loc)):
-                    ok = True
-                    break
-        if not ok:
-            return False, f"location '{job.location}' not in {c.locations}"
+    ok, reason = location_ok(job, profile)
+    if not ok:
+        return False, reason
 
     return True, None
+
+
+def seniority_ok(job: Job, profile: Profile) -> tuple[bool, str | None]:
+    c = profile.constraints
+    ceiling = c.max_seniority
+    if c.is_student and ceiling is None:
+        ceiling = Seniority.entry
+    job_level = infer_seniority(job)
+    if ceiling is not None and job_level is not None and _rank(job_level) > _rank(ceiling):
+        return False, f"role level '{job_level.value}' above your level '{ceiling.value}'"
+    if c.allowed_seniorities and job_level is not None and job_level not in c.allowed_seniorities:
+        return False, f"seniority '{job_level.value}' not in allowed set"
+    return True, None
+
+
+def workstyle_ok(job: Job, profile: Profile) -> tuple[bool, str | None]:
+    c = profile.constraints
+    wp = (job.workplace_type or "").lower()
+    wtypes = [w.lower() for w in c.workplace_types] or (["remote"] if c.remote_only else [])
+    if wtypes and "any" not in wtypes and wp and not any(w in wp for w in wtypes):
+        return False, f"work style '{job.workplace_type}' not acceptable ({wtypes})"
+    return True, None
+
+
+def location_ok(job: Job, profile: Profile) -> tuple[bool, str | None]:
+    c = profile.constraints
+    if not c.locations:
+        return True, None
+    wp = (job.workplace_type or "").lower()
+    loc_hay = f"{(job.location or '').lower()} {wp}"
+    wtypes = [w.lower() for w in c.workplace_types]
+    remote_ok = "remote" in wtypes or any(_expand_location(loc) & {"remote"} for loc in c.locations)
+    if "remote" in loc_hay and remote_ok:
+        return True, None
+    for loc in c.locations:
+        if any(alias in loc_hay for alias in _expand_location(loc)):
+            return True, None
+    return False, f"location '{job.location}' not in {c.locations}"
 
 
 # City/region aliases so "Bangalore" matches "Bengaluru, Karnataka, India", etc.

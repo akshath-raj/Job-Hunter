@@ -35,30 +35,27 @@ SALARY_RE = re.compile(
 _INSTRUCTIONS = """Return ONLY a JSON object:
 {
   "about": string,           // 1-2 sentences on what the company does
-  "salary": string,          // pay range WITH currency/country, e.g. "₹18-24 LPA (INR)"
-                             // or "$120k-150k/yr (USD)". If NOT in the posting, research
-                             // it (Glassdoor/Levels.fyi/AmbitionBox) and prefix "est. ".
-                             // For REMOTE roles, state the currency explicitly.
+  "salary": string,          // the TYPICAL / AVERAGE pay for THIS ROLE in THIS LOCATION,
+                             // averaged across the many postings in the snippets (NOT one
+                             // company). WITH currency/country, e.g. "avg ~₹12 LPA (INR),
+                             // range ₹8-18 LPA". Prefix "est. ". For remote, state currency.
   "qualifications": string,  // key required qualifications, one line
   "work_culture": string,    // 1-2 sentences on culture, from employee reviews
   "pros": string,            // top positives from reviews, "; "-separated
   "cons": string,            // top negatives from reviews, "; "-separated
-  "concerns": string,        // mismatches vs the candidate's REQUIREMENTS below
-                             // (e.g. salary below expectation, wrong location/style,
-                             // a deal-breaker) — or "" if it fits well
   "source": string           // where the info came from (sites/URLs or "job posting")
 }"""
 
 _DEEP_SYS = (
     "You are a company & compensation research analyst. From a job posting plus web "
-    "search snippets (salary sites and employee-review sites like Glassdoor, "
-    "Levels.fyi, AmbitionBox, Indeed, Comparably), produce accurate, concise "
-    "details.\n"
+    "search snippets, produce accurate, concise details.\n"
     "ACCURACY IS PARAMOUNT — NEVER invent or guess:\n"
     "- 'about' and 'qualifications': derive from the posting (always answerable).\n"
-    "- 'salary': report ONLY a figure found in the posting or the provided snippets, "
-    "WITH its currency/country (explicit for remote). If neither contains salary, "
-    "return \"\" — do NOT estimate from general knowledge.\n"
+    "- 'salary': the snippets aggregate MANY people's reported pay for this role. "
+    "Compute a representative AVERAGE and range for THIS ROLE in THIS LOCATION (a "
+    "role's pay varies by city, so respect the location). Do NOT tie it to the one "
+    "hiring company. WITH currency. If the snippets contain no salary data, return "
+    "\"\" — do NOT estimate from general knowledge.\n"
     "- 'work_culture'/'pros'/'cons': ONLY from the review snippets. If none, return \"\".\n"
     "It is far better to leave a field empty than to fill it with something wrong. "
     "Respond with ONLY the JSON asked for."
@@ -206,61 +203,41 @@ def _llm_json_retry(system: str, prompt: str, max_tokens: int, attempts: int = 2
 
 
 def _deep_queries(job: Job) -> list[str]:
-    """A mini deep-research sweep across salary AND employee-review sources."""
+    """Salary queries are ROLE + LOCATION based (average many postings, not this one
+    company); review queries are company-based for culture/pros/cons."""
+    role = job.title
     loc = job.location or ""
     return [
-        f"{job.title} {job.company} {loc} salary",
-        f"{job.company} salary glassdoor levels.fyi ambitionbox payscale",
-        f"{job.company} employee reviews work culture glassdoor ambitionbox indeed",
-        f"{job.company} pros and cons working comparably review",
+        f"{role} average salary {loc} glassdoor",          # role+location salary...
+        f"{role} salary {loc} ambitionbox payscale levels.fyi",
+        f"{job.company} employee reviews work culture glassdoor ambitionbox",  # company culture
+        f"{job.company} pros and cons working comparably indeed review",
     ]
 
 
-def _requirements_block(profile) -> str:
-    if profile is None:
-        return ""
-    from . import profile as profile_mod
-
-    c = profile.constraints
-    exp = profile_mod.recall(profile, "expected salary")
-    return (
-        "\nCANDIDATE REQUIREMENTS (flag mismatches in 'concerns'):\n"
-        f"- Expected salary: {exp or 'not specified'}\n"
-        f"- Locations: {', '.join(c.locations) or 'any'}\n"
-        f"- Work styles: {', '.join(c.workplace_types) or 'any'}\n"
-        f"- Deal-breakers: {', '.join(c.exclude_keywords) or 'none'}\n"
-    )
-
-
 async def enrich_with_browser(context, job: Job, profile=None, use_llm: bool = True) -> Job:
-    """Deep enrichment: salary (with currency) + company culture/pros/cons, plus a
-    cross-check of the job against the candidate's requirements (job.flags)."""
-    posted_salary = salary_in_text(job.description)
-
+    """Gather FACTS only: role+location salary (averaged from the web) and company
+    culture/pros/cons. Judgement (RAG + flags) is done later by the eligibility
+    agent. `profile` is unused here now but kept for call-site compatibility."""
     results = await asyncio.gather(
         *(_search_snippets(context, q) for q in _deep_queries(job)),
         return_exceptions=True,
     )
     snippets = "\n".join(s for s in results if isinstance(s, str) and s.strip())
 
-    llm_concerns = None
     if use_llm:
         prompt = (
-            f"Job: {job.title} at {job.company}\n"
-            f"Location: {job.location or 'unknown'} "
-            f"(workplace: {job.workplace_type or 'n/a'})\n"
-            f"Salary in posting: {posted_salary or 'not stated'}\n"
-            f"Posting excerpt:\n{(job.description or '')[:1800]}\n"
-            f"{_requirements_block(profile)}\n"
-            f"Web search snippets (salary + reviews):\n{snippets[:4000]}\n\n"
+            f"Role: {job.title}\nLocation: {job.location or 'unknown'}\n"
+            f"Company: {job.company}\n"
+            f"Posting excerpt:\n{(job.description or '')[:1800]}\n\n"
+            f"Web search snippets (role salaries + company reviews):\n{snippets[:4000]}\n\n"
             f"{_INSTRUCTIONS}"
         )
         data = _llm_json_retry(_DEEP_SYS, prompt, max_tokens=800)
         if data:
             apply_enrichment(job, data)
-            llm_concerns = data.get("concerns")
             if not job.enrichment_source:
-                job.enrichment_source = "web research (salary + review sites)"
+                job.enrichment_source = "web research (role salary avg + reviews)"
         # Guarantee posting-derived fields (always answerable from the description).
         if job.description and (not job.about or not job.qualifications):
             basic = _llm_json_retry(
@@ -274,7 +251,8 @@ async def enrich_with_browser(context, job: Job, profile=None, use_llm: bool = T
                 job.qualifications = job.qualifications or basic.get("qualifications")
 
     if not job.enriched:
-        # No-LLM fallback: at least fill salary from the posting or a regex hit.
+        # No-LLM fallback: at least a salary from the posting or a regex web hit.
+        posted_salary = salary_in_text(job.description)
         if posted_salary:
             job.salary, job.enrichment_source = posted_salary, "job posting"
         else:
@@ -283,11 +261,6 @@ async def enrich_with_browser(context, job: Job, profile=None, use_llm: bool = T
                 job.salary, job.enrichment_source = f"est. {hit}", "web research"
         job.enriched = True
 
-    # Cross-check against requirements (deterministic + LLM concerns).
-    if profile is not None:
-        from . import fit
-
-        job.flags = fit.merge(fit.check(job, profile), llm_concerns)
     return job
 
 

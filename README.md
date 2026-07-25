@@ -69,9 +69,13 @@ It runs two ways from one codebase:
 - **Salary research** — when a posting omits pay, a parallel agent sweeps
   multiple sources (Glassdoor, Levels.fyi, AmbitionBox, Payscale) and reconciles
   them.
-- **Relevance checking** — a keyword scorer *plus* an LLM cross-check vet every
-  job against your résumé brief, so off-field roles (HR, content, sales) are
-  dropped before they reach the spreadsheet.
+- **Eligibility agent (RAG)** — a final agent classifies every job 🟢/🟡/🔴:
+  **green** = eligible; **yellow** = you can apply but it misses a soft
+  preference (salary below expectation, culture); **red** = strictly can't apply
+  (qualifications, location, seniority, deal-breaker). Colored in the sheet.
+- **Salary by role, averaged** — salary is researched for the *role in that
+  location* across many postings (Glassdoor/AmbitionBox/Levels.fyi) and averaged
+  — not scraped from the one posting.
 - **Rich spreadsheet** — every search writes a `jobs.xlsx` with salary (currency
   labelled), company culture, pros/cons from employee reviews, job description,
   days since posted, applicant count, qualifications, and link.

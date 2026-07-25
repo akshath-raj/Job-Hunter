@@ -308,19 +308,10 @@ async def search_jobs(
         if export:
             export_excel()
 
-        # LLM cross-check: tag off-field jobs the keyword scorer missed. These are
-        # NOT removed — they stay in the sheet, just marked ineligible with a reason.
-        eligible_new = [j for j in new_jobs if j.status == JobStatus.eligible]
-        off_target = relevance.llm_filter(profile, eligible_new, candidate_brief())
-        for job in eligible_new:
-            if job.id in off_target:
-                job.status = JobStatus.ineligible
-                job.ineligible_reason = "LLM check: outside your field/level"
-                store.update_job(job)
-
-        # Phase 2: enrich ALL found jobs (salary, culture, flags) — best effort.
+        # Phase 2: enrich ALL found jobs with FACTS (role salary, culture) — best
+        # effort, in parallel research agents.
+        use_llm = config.has_llm()
         if enrich and new_jobs:
-            use_llm = config.has_llm()
             sem = asyncio.Semaphore(max(1, concurrency))
 
             async def worker(job: Job) -> None:
@@ -332,13 +323,45 @@ async def search_jobs(
 
             await asyncio.gather(*(worker(j) for j in new_jobs))
 
+    # Phase 3: final eligibility agents classify each job RAG (uses salary +
+    # qualifications + location). Runs in threads so the LLM calls parallelize.
+    if new_jobs:
+        await _classify_all(new_jobs, profile, use_llm, concurrency)
+
     result = {"tier": tier, "target": target, "queries": queries,
               "variations": len(tasks), "found": total, "new": len(new_jobs),
-              "skipped_already_seen": skipped_seen,
-              "llm_enrichment": config.has_llm(), **store.counts_by_status()}
+              "skipped_already_seen": skipped_seen, "llm_enrichment": use_llm,
+              "rag": _rag_counts(new_jobs), **store.counts_by_status()}
     if export:
         result["excel"] = export_excel()["path"]     # Phase 3: rewrite with details
     return result
+
+
+async def _classify_all(jobs: list[Job], profile: Profile, use_llm: bool,
+                        concurrency: int) -> None:
+    """Run the eligibility agent on each job (parallel), set rag/flags/status."""
+    from . import eligibility
+
+    sem = asyncio.Semaphore(max(1, concurrency))
+
+    async def one(job: Job) -> None:
+        async with sem:
+            rag, flags = await asyncio.to_thread(eligibility.classify, job, profile, use_llm)
+        job.rag = rag
+        job.flags = "; ".join(flags) or None
+        job.status = JobStatus.ineligible if rag == "red" else JobStatus.eligible
+        job.ineligible_reason = job.flags if rag == "red" else None
+        store.update_job(job)
+
+    await asyncio.gather(*(one(j) for j in jobs))
+
+
+def _rag_counts(jobs: list[Job]) -> dict[str, int]:
+    out = {"green": 0, "yellow": 0, "red": 0}
+    for j in jobs:
+        if j.rag in out:
+            out[j.rag] += 1
+    return out
 
 
 # ---- apply ----------------------------------------------------------------
@@ -498,7 +521,10 @@ async def enrich_jobs(job_ids: list[str] | None = None, limit: int = 25,
     async with browser.session(headless=headless) as s:
         await asyncio.gather(*(worker(j) for j in jobs))
 
-    result = {"enriched": len(jobs), "llm_enrichment": use_llm}
+    # Re-classify eligibility now that salary/qualifications are filled.
+    await _classify_all(jobs, profile, use_llm, concurrency)
+
+    result = {"enriched": len(jobs), "llm_enrichment": use_llm, "rag": _rag_counts(jobs)}
     if export:
         result["excel"] = export_excel()["path"]
     return result
@@ -513,9 +539,10 @@ def export_excel(status: JobStatus | None = None, path: str | None = None,
 
     jobs = store.list_jobs(status=status, limit=2000)
     if status is None and eligible_only:
-        jobs = [j for j in jobs if j.status not in {JobStatus.ineligible, JobStatus.skipped}]
-    # Eligible/relevant first, then by match score (best fit at the top).
-    jobs.sort(key=lambda j: (j.status != JobStatus.eligible, -(j.match_score or 0.0)))
+        jobs = [j for j in jobs if j.rag != "red"]
+    # green first, then yellow, then red; best match score within each band.
+    rag_order = {"green": 0, "yellow": 1, "red": 2, None: 3}
+    jobs.sort(key=lambda j: (rag_order.get(j.rag, 3), -(j.match_score or 0.0)))
     out = export.to_excel(jobs, path)
     return {"path": out, "rows": len(jobs)}
 

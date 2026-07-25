@@ -156,7 +156,8 @@ class Job(BaseModel):
     pros: str | None = None             # positives from reviews (Glassdoor/AmbitionBox…)
     cons: str | None = None             # negatives from reviews
     enrichment_source: str | None = None  # where the research came from
-    flags: str | None = None            # ⚠ mismatches vs the user's requirements
+    rag: str | None = None              # "green" | "yellow" | "red" (final eligibility)
+    flags: str | None = None            # combined reasons: hard blocks + soft concerns
     enriched: bool = False
 
 
