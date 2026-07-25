@@ -56,8 +56,9 @@ _JD_INSTRUCTIONS = """Return ONLY JSON:
 
 # Step 2 — fill gaps from the web (salary averaged across many posts; reviews).
 _WEB_SYS = (
-    "You are a compensation & company-reviews analyst working from web search "
-    "snippets. NEVER invent data.\n"
+    "You are a compensation & company-reviews analyst working from the TOP web "
+    "search results (any reputable source — salary aggregators, job boards, "
+    "articles, forums). NEVER invent data.\n"
     "- 'salary': the snippets contain MANY people's reported pay for this role. "
     "Compute the AVERAGE across ALL of them for THIS ROLE in THIS LOCATION (pay "
     "varies by city) — do not rely on a single post or tie it to one company. "
@@ -172,17 +173,18 @@ def _llm_json_retry(system: str, prompt: str, max_tokens: int, attempts: int = 2
 
 
 def _salary_queries(job: Job) -> list[str]:
-    """ROLE + LOCATION salary queries — average many people's posts, not this one.
-    Interns are paid a MONTHLY stipend, so query for that."""
+    """ROLE + LOCATION salary queries — plain searches so we pull the TOP results
+    from any reputable source, not just one or two sites. Interns are paid a
+    MONTHLY stipend, so query for that."""
     role, loc = job.title, (job.location or "")
     if is_intern(job):
         return [
             f"{role} intern stipend per month {loc}",
-            f"{role} internship stipend {loc} glassdoor ambitionbox",
+            f"{role} internship average stipend {loc}",
         ]
     return [
-        f"{role} average salary {loc} glassdoor",
-        f"{role} salary {loc} ambitionbox payscale levels.fyi",
+        f"{role} average salary {loc}",
+        f"{role} salary range {loc} per year",
     ]
 
 
