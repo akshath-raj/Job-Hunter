@@ -386,6 +386,83 @@ def _bucket(status: JobStatus) -> str:
     }.get(status, "failed")
 
 
+def add_document(name: str, path: str) -> dict:
+    """Allowlist a document (e.g. cover letter, or a govt ID you consent to use)."""
+    from . import documents
+
+    prof = profile_mod.load()
+    ok = documents.register(prof, name, path)
+    if not ok:
+        return {"added": False, "error": f"File not found: {path}"}
+    profile_mod.save(prof)
+    return {"added": True, "documents": prof.documents}
+
+
+def list_documents() -> dict:
+    prof = profile_mod.load()
+    return {"resume": prof.identity.resume_path, "documents": prof.documents,
+            "upload_approval": prof.require_upload_approval}
+
+
+def select_jobs_nl(description: str, use_llm: bool = True) -> dict:
+    """Understand a plain-English instruction and return the matching job ids.
+
+    e.g. "apply to the green Bangalore ones" or "all the Microsoft and Google
+    roles". Falls back to simple company/location text matching without an LLM.
+    """
+    from . import config
+
+    cands = [j for j in store.list_jobs(limit=2000) if not _already_applied(j.id)]
+    if not cands:
+        return {"job_ids": [], "message": "No pending jobs — search first."}
+
+    if use_llm and config.has_llm():
+        from . import llm
+
+        listing = "\n".join(
+            f"{j.id} | {j.title} | {j.company} | {j.location or '-'} | {j.rag or '-'}"
+            for j in cands[:250]
+        )
+        try:
+            data = llm.complete_json(
+                "You pick which jobs to apply to from a list, based on the user's "
+                "instruction. Only choose ids present in the list. Prefer green, "
+                "then yellow; avoid red unless the user explicitly asks.",
+                f"Instruction: {description}\n\n"
+                f"Jobs (id | title | company | location | eligibility):\n{listing}\n\n"
+                'Return {"job_ids": [ids]}',
+            )
+            valid = {j.id for j in cands}
+            ids = [i for i in (data.get("job_ids") or []) if i in valid]
+            return {"job_ids": ids, "count": len(ids), "via": "llm"}
+        except Exception:  # noqa: BLE001 — fall through to text match
+            pass
+
+    low = description.lower()
+    ids = [j.id for j in cands
+           if j.company.lower() in low or (j.location and j.location.lower() in low)]
+    return {"job_ids": ids, "count": len(ids), "via": "text-match"}
+
+
+async def apply_by_description(
+    profile: Profile, description: str, mode: str = "auto",
+    require_upload_approval: bool | None = None, headless: bool = False,
+    use_llm: bool = True, concurrency: int = 2,
+) -> dict:
+    """Select jobs from plain English, then apply to them."""
+    sel = select_jobs_nl(description, use_llm=use_llm)
+    if not sel.get("job_ids"):
+        return {"applied": 0, "message": "No jobs matched your description.", **sel}
+    if require_upload_approval is not None:
+        profile.require_upload_approval = require_upload_approval
+    res = await apply_batch(
+        profile, mode="select", selected_ids=sel["job_ids"],
+        use_llm=use_llm, headless=headless, concurrency=concurrency,
+    )
+    res["selected"] = sel
+    return res
+
+
 async def apply_batch(
     profile: Profile,
     limit: int = 10,

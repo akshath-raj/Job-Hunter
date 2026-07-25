@@ -65,14 +65,31 @@ async def fill_generic_form(page, profile: Profile, answerer: ProfileAnswerer,
         elif await control.get_attribute("required") is not None:
             result.needs_input = True
 
-    # Resume upload.
-    if resume_path:
-        for fileinput in await page.query_selector_all("input[type='file']"):
-            try:
-                await fileinput.set_input_files(resume_path)
-                result.answers["resume"] = resume_path
-            except Exception:  # noqa: BLE001
-                pass
+    # File uploads — GUARDED: only ever upload allowlisted docs; stop for a
+    # sensitive/govt ID; respect approval mode.
+    from .. import documents
+
+    for fileinput in await page.query_selector_all("input[type='file']"):
+        label = await _label_for(page, fileinput)
+        path, consent = documents.resolve_upload(profile, label)
+        if consent:                       # sensitive doc or nothing suitable
+            result.needs_input = True
+            result.prompt = consent
+            return result
+        if not path or not documents.is_allowed(profile, path):
+            continue                      # never upload a non-allowlisted file
+        if profile.require_upload_approval:
+            result.needs_input = True
+            result.prompt = (
+                f"Approve upload of '{path}' for field '{label}'? Re-run with "
+                f"--auto-uploads to let me upload registered docs without asking."
+            )
+            return result
+        try:
+            await fileinput.set_input_files(path)
+            result.answers[f"upload:{label}"] = path
+        except Exception:  # noqa: BLE001
+            pass
 
     # Selects.
     for sel in await page.query_selector_all("select"):

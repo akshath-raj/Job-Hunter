@@ -118,6 +118,19 @@ async def _external_apply(
         _apply_form_result(app, gres, await _screenshot(target, job) if gres.submitted else None)
         return app
 
+    # GUARDRAIL: verify this is the company's official site / a trusted ATS before
+    # entering any personal details.
+    from . import verify
+
+    trusted, why = verify.check(target.url, job.company)
+    if not trusted:
+        app.status = JobStatus.needs_input
+        app.needs_input_prompt = (
+            f"Stopped before filling: {why}. If this really is {job.company}'s "
+            f"application page, apply manually here: {target.url}"
+        )
+        return app
+
     # Generic external site: fill what we can, then look for a submit.
     resume_path = profile.identity.resume_path
     fres = await forms.fill_generic_form(target, profile, answerer, resume_path)

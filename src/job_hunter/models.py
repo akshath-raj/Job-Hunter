@@ -93,6 +93,12 @@ class Profile(BaseModel):
     # context (what to prioritize, company preferences, deal-breakers).
     search_context: str | None = None
 
+    # Allowlisted documents the agent may upload (name -> path). ONLY these files
+    # are ever uploaded. Sensitive docs (govt ID) must be added explicitly.
+    documents: dict[str, str] = Field(default_factory=dict)
+    # If True, the agent asks before uploading any local file (approval mode).
+    require_upload_approval: bool = True
+
     # Ask-once persistent memory. Anything not on the resume that an application
     # asked for (10th/12th marks, CGPA, notice period, ...) is remembered here,
     # keyed by a normalized question, and reused across every future session.

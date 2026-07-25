@@ -84,6 +84,24 @@ def profile():
     console.print_json(p.model_dump_json(indent=2))
 
 
+document_app = typer.Typer(help="Manage documents the agent may upload (allowlist).")
+app.add_typer(document_app, name="document")
+
+
+@document_app.command("add")
+def document_add(name: str, path: str):
+    """Allowlist a document (e.g. `document add cover-letter ~/cl.pdf`, or an ID
+    you consent to use like `document add aadhaar ~/aadhaar.pdf`)."""
+    res = service.add_document(name, path)
+    console.print_json(data=res)
+
+
+@document_app.command("list")
+def document_list():
+    """Show the documents the agent is allowed to upload."""
+    console.print_json(data=service.list_documents())
+
+
 @app.command()
 def brief():
     """Show the detailed candidate brief the search agent uses."""
@@ -220,9 +238,20 @@ def apply(
     concurrency: int = typer.Option(2, "--concurrency", "-c", help="Parallel applications."),
     no_llm: bool = typer.Option(False, "--no-llm", help="Disable LLM answers (skip on unknowns)."),
     headless: bool = typer.Option(False, "--headless", help="Run without showing the browser."),
+    describe: str = typer.Option(None, "--describe", "-d",
+                                 help="Plain English: which jobs to apply to."),
+    auto_uploads: bool = typer.Option(False, "--auto-uploads",
+                                      help="Upload registered docs without asking."),
 ):
-    """Apply to jobs — fully autonomous ('auto') or pick-your-own ('select')."""
+    """Apply to jobs — by id, plain-English description, or your top matches."""
     p = profile_mod.load()
+    p.require_upload_approval = not auto_uploads
+    if describe:
+        res = _run(service.apply_by_description(
+            p, describe, use_llm=not no_llm, headless=headless,
+            require_upload_approval=not auto_uploads, concurrency=concurrency))
+        console.print_json(data=res)
+        return
     if job:
         res = _run(service.apply_single(p, job, use_llm=not no_llm, headless=headless))
         console.print_json(data=res)

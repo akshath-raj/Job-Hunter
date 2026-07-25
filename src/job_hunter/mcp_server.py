@@ -342,6 +342,37 @@ def clear_data(
 
 
 @mcp.tool()
+def select_jobs(description: str) -> dict[str, Any]:
+    """Understand a plain-English instruction ('apply to the green Bangalore ones')
+    and return the matching job ids to apply to."""
+    return service.select_jobs_nl(description)
+
+
+@mcp.tool()
+async def apply_to_described(description: str, auto_uploads: bool = False,
+                             headless: bool = False) -> dict[str, Any]:
+    """Select jobs from plain English and apply. auto_uploads=False (default) makes
+    the agent ASK before uploading any local file; True uploads registered docs
+    without asking. Never uploads a non-registered or govt-ID file without consent."""
+    return await service.apply_by_description(
+        profile_mod.load(), description, require_upload_approval=not auto_uploads,
+        headless=headless)
+
+
+@mcp.tool()
+def add_document(name: str, path: str) -> dict[str, Any]:
+    """Allowlist a local document the agent may upload (resume is already allowed).
+    Register a govt ID here ONLY with the user's explicit consent."""
+    return service.add_document(name, path)
+
+
+@mcp.tool()
+def list_documents() -> dict[str, Any]:
+    """List documents the agent is allowed to upload."""
+    return service.list_documents()
+
+
+@mcp.tool()
 def pending_input_jobs() -> list[dict[str, Any]]:
     """Jobs paused waiting on the user (a question we couldn't answer, a CAPTCHA, etc.)."""
     out = []
