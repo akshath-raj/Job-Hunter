@@ -21,24 +21,27 @@ def test_salary_in_text(text, expected_substr):
         assert got is not None and expected_substr in got
 
 
-async def test_research_salary_uses_web_snippets(monkeypatch, make_job):
-    async def fake_snippets(context, query):
-        assert "glassdoor" in query.lower()          # we target Glassdoor
-        return "Glassdoor estimate: $130,000 - $160,000 per year for this role"
-
-    monkeypatch.setattr(enrich, "_search_snippets", fake_snippets)
-    salary, source = await enrich.research_salary(None, make_job("SWE"), use_llm=False)
-    assert salary and "$130,000" in salary
-    assert source and "web" in source.lower()
+async def test_salary_queries_are_role_and_location_based(make_job):
+    job = make_job("Machine Learning Engineer")
+    job.location = "Bengaluru"
+    qs = enrich._salary_queries(job)
+    assert all("Acme" not in q for q in qs)          # NOT company-specific
+    assert all("Bengaluru" in q for q in qs)         # location included
+    assert any("average salary" in q for q in qs)
 
 
-async def test_enrich_reads_salary_from_posting(make_job):
+async def test_jd_salary_takes_priority(monkeypatch, make_job):
+    # Salary in the JD must be used; the web must NOT be consulted.
     job = make_job("Backend Engineer")
     job.description = "Role details... Salary: $95,000 - $110,000 a year. Apply now."
+
+    async def boom(context, query):
+        raise AssertionError("web search should not run when JD has salary")
+
+    monkeypatch.setattr(enrich, "_search_snippets", boom)
     await enrich.enrich_with_browser(context=None, job=job, use_llm=False)
-    assert job.enriched is True
     assert job.salary and "$95,000" in job.salary
-    assert job.enrichment_source == "job posting"
+    assert job.enrichment_source == "LinkedIn job description"
 
 
 def test_llm_json_retry_recovers(monkeypatch):

@@ -32,47 +32,52 @@ SALARY_RE = re.compile(
     re.IGNORECASE,
 )
 
-_INSTRUCTIONS = """Return ONLY a JSON object:
+# Step 1 — extract from the LinkedIn job description FIRST (source of truth).
+_JD_SYS = (
+    "Extract details from a LinkedIn job posting ONLY. Use the posting text — do "
+    "not use outside knowledge. For salary, report a figure ONLY if the posting "
+    "explicitly states pay; otherwise return \"\". Never fabricate."
+)
+_JD_INSTRUCTIONS = """Return ONLY JSON:
 {
-  "about": string,           // 1-2 sentences on what the company does
-  "salary": string,          // the TYPICAL / AVERAGE pay for THIS ROLE in THIS LOCATION,
-                             // averaged across the many postings in the snippets (NOT one
-                             // company). WITH currency/country, e.g. "avg ~₹12 LPA (INR),
-                             // range ₹8-18 LPA". Prefix "est. ". For remote, state currency.
-  "qualifications": string,  // key required qualifications, one line
-  "work_culture": string,    // 1-2 sentences on culture, from employee reviews
-  "pros": string,            // top positives from reviews, "; "-separated
-  "cons": string,            // top negatives from reviews, "; "-separated
-  "source": string           // where the info came from (sites/URLs or "job posting")
+  "about": string,           // what the company/team does, from the posting (1-2 sentences)
+  "qualifications": string,  // required qualifications, summarized from the posting
+  "salary": string           // pay WITH currency ONLY if the posting states it; else ""
 }"""
 
-_DEEP_SYS = (
-    "You are a company & compensation research analyst. From a job posting plus web "
-    "search snippets, produce accurate, concise details.\n"
-    "ACCURACY IS PARAMOUNT — NEVER invent or guess:\n"
-    "- 'about' and 'qualifications': derive from the posting (always answerable).\n"
-    "- 'salary': the snippets aggregate MANY people's reported pay for this role. "
-    "Compute a representative AVERAGE and range for THIS ROLE in THIS LOCATION (a "
-    "role's pay varies by city, so respect the location). Do NOT tie it to the one "
-    "hiring company. WITH currency. If the snippets contain no salary data, return "
-    "\"\" — do NOT estimate from general knowledge.\n"
-    "- 'work_culture'/'pros'/'cons': ONLY from the review snippets. If none, return \"\".\n"
-    "It is far better to leave a field empty than to fill it with something wrong. "
+# Step 2 — fill gaps from the web (salary averaged across many posts; reviews).
+_WEB_SYS = (
+    "You are a compensation & company-reviews analyst working from web search "
+    "snippets. NEVER invent data.\n"
+    "- 'salary': the snippets contain MANY people's reported pay for this role. "
+    "Compute the AVERAGE across ALL of them for THIS ROLE in THIS LOCATION (pay "
+    "varies by city) — do not rely on a single post or tie it to one company. "
+    "Report avg + range WITH currency, prefixed 'est.'. If no salary data, \"\".\n"
+    "- 'work_culture'/'pros'/'cons': ONLY from the employee-review snippets; \"\" if none.\n"
     "Respond with ONLY the JSON asked for."
 )
+_WEB_INSTRUCTIONS = """Return ONLY JSON:
+{
+  "salary": string,        // averaged role+location pay (see rules); "" if unknown
+  "work_culture": string,  // 1-2 sentences from reviews; "" if none
+  "pros": string,          // top positives from reviews, "; "-separated
+  "cons": string           // top negatives from reviews, "; "-separated
+}"""
 
 
-def enrichment_prompt(job: Job) -> str:
+def enrichment_prompt(job: Job) -> str:   # MCP prompt for Claude Code
     return (
-        f"Job: {job.title} at {job.company}\n"
-        f"Location: {job.location or 'unknown'}\n"
+        f"Job: {job.title} at {job.company}\nLocation: {job.location or 'unknown'}\n"
         f"Posting excerpt:\n{(job.description or '')[:2000]}\n\n"
-        f"Research salary on Glassdoor/Levels.fyi/AmbitionBox and company culture / "
-        f"pros / cons from employee reviews across sites.\n\n{_INSTRUCTIONS}"
+        f"First take qualifications/salary from the posting. If salary isn't in the "
+        f"posting, research the AVERAGE for this role+location (Glassdoor/AmbitionBox/"
+        f"Levels.fyi). Take company culture/pros/cons from employee reviews.\n\n"
+        f"{_WEB_INSTRUCTIONS}"
     )
 
 
 def apply_enrichment(job: Job, data: dict) -> Job:
+    """Merge enrichment data (MCP path) without clobbering existing values."""
     job.about = data.get("about") or job.about
     job.salary = data.get("salary") or job.salary
     job.qualifications = data.get("qualifications") or job.qualifications
@@ -145,51 +150,6 @@ async def _search_snippets(context, query: str) -> str:
     return ""
 
 
-def _salary_queries(job: Job) -> list[str]:
-    """Several angles / sources — a mini deep-research sweep, not just Glassdoor."""
-    loc = job.location or ""
-    return [
-        f"{job.title} {job.company} {loc} salary",                 # general web
-        f"{job.title} {job.company} salary glassdoor OR levels.fyi",
-        f"{job.title} {job.company} salary ambitionbox OR payscale OR indeed",
-    ]
-
-
-async def research_salary(context, job: Job, use_llm: bool = True) -> tuple[str | None, str | None]:
-    """Web-research the salary across several sources. Returns (salary, source)."""
-    results = await asyncio.gather(
-        *(_search_snippets(context, q) for q in _salary_queries(job)),
-        return_exceptions=True,
-    )
-    snippets = "\n".join(s for s in results if isinstance(s, str) and s.strip())
-    if not snippets.strip():
-        return None, None
-
-    source = "web research (Glassdoor / Levels.fyi / AmbitionBox / Payscale)"
-    if use_llm:
-        try:
-            from . import llm
-
-            ans = llm.complete(
-                "You are a compensation researcher. From these web search snippets "
-                "(multiple sources), infer the most credible salary/compensation "
-                "range for THIS role at THIS company/location. Prefer concrete "
-                "figures; reconcile conflicting sources sensibly. If nothing "
-                "usable is present, reply exactly 'unknown'. Otherwise reply with "
-                "ONLY the range, prefixed 'est. '.",
-                f"Role: {job.title} at {job.company} ({job.location or 'n/a'})\n"
-                f"Snippets:\n{snippets[:4000]}",
-                max_tokens=80,
-            ).strip()
-            if ans and "unknown" not in ans.lower():
-                return ans, source
-        except Exception:  # noqa: BLE001 — fall back to regex
-            pass
-
-    hit = salary_in_text(snippets)
-    return (f"est. {hit}", source) if hit else (None, None)
-
-
 def _llm_json_retry(system: str, prompt: str, max_tokens: int, attempts: int = 2) -> dict | None:
     """Call the LLM for JSON, retrying transient failures. Returns None if all fail."""
     from . import llm
@@ -202,65 +162,87 @@ def _llm_json_retry(system: str, prompt: str, max_tokens: int, attempts: int = 2
     return None
 
 
-def _deep_queries(job: Job) -> list[str]:
-    """Salary queries are ROLE + LOCATION based (average many postings, not this one
-    company); review queries are company-based for culture/pros/cons."""
-    role = job.title
-    loc = job.location or ""
+def _salary_queries(job: Job) -> list[str]:
+    """ROLE + LOCATION salary queries — average many people's posts, not this one."""
+    role, loc = job.title, (job.location or "")
     return [
-        f"{role} average salary {loc} glassdoor",          # role+location salary...
+        f"{role} average salary {loc} glassdoor",
         f"{role} salary {loc} ambitionbox payscale levels.fyi",
-        f"{job.company} employee reviews work culture glassdoor ambitionbox",  # company culture
+    ]
+
+
+def _culture_queries(job: Job) -> list[str]:
+    """Company-review queries for culture / pros / cons."""
+    return [
+        f"{job.company} employee reviews work culture glassdoor ambitionbox",
         f"{job.company} pros and cons working comparably indeed review",
     ]
 
 
 async def enrich_with_browser(context, job: Job, profile=None, use_llm: bool = True) -> Job:
-    """Gather FACTS only: role+location salary (averaged from the web) and company
-    culture/pros/cons. Judgement (RAG + flags) is done later by the eligibility
-    agent. `profile` is unused here now but kept for call-site compatibility."""
-    results = await asyncio.gather(
-        *(_search_snippets(context, q) for q in _deep_queries(job)),
-        return_exceptions=True,
-    )
-    snippets = "\n".join(s for s in results if isinstance(s, str) and s.strip())
-
-    if use_llm:
-        prompt = (
-            f"Role: {job.title}\nLocation: {job.location or 'unknown'}\n"
-            f"Company: {job.company}\n"
-            f"Posting excerpt:\n{(job.description or '')[:1800]}\n\n"
-            f"Web search snippets (role salaries + company reviews):\n{snippets[:4000]}\n\n"
-            f"{_INSTRUCTIONS}"
+    """Facts, LinkedIn-JD-first. Step 1: about/qualifications/salary from the job
+    description. Step 2: web ONLY for what the JD lacks — salary averaged across
+    many role+location posts, and company culture/pros/cons from reviews."""
+    # --- Step 1: the LinkedIn job description is the source of truth ------
+    if use_llm and job.description:
+        jd = _llm_json_retry(
+            _JD_SYS,
+            f"Job: {job.title} at {job.company}\nLocation: {job.location or 'n/a'}\n"
+            f"Posting:\n{job.description[:3000]}\n\n{_JD_INSTRUCTIONS}",
+            max_tokens=500,
         )
-        data = _llm_json_retry(_DEEP_SYS, prompt, max_tokens=800)
-        if data:
-            apply_enrichment(job, data)
-            if not job.enrichment_source:
-                job.enrichment_source = "web research (role salary avg + reviews)"
-        # Guarantee posting-derived fields (always answerable from the description).
-        if job.description and (not job.about or not job.qualifications):
-            basic = _llm_json_retry(
-                "Summarize from the posting only. Respond with ONLY JSON.",
-                f"Job: {job.title} at {job.company}\nPosting:\n{job.description[:2500]}\n\n"
-                'Return {"about": string, "qualifications": string}.',
-                max_tokens=300,
-            )
-            if basic:
-                job.about = job.about or basic.get("about")
-                job.qualifications = job.qualifications or basic.get("qualifications")
+        if jd:
+            job.about = jd.get("about") or job.about
+            job.qualifications = jd.get("qualifications") or job.qualifications
+            if jd.get("salary"):
+                job.salary = jd["salary"]
+                job.enrichment_source = "LinkedIn job description"
+    if not job.salary:                                  # regex on the JD as a backstop
+        posted = salary_in_text(job.description)
+        if posted:
+            job.salary, job.enrichment_source = posted, "LinkedIn job description"
 
-    if not job.enriched:
-        # No-LLM fallback: at least a salary from the posting or a regex web hit.
-        posted_salary = salary_in_text(job.description)
-        if posted_salary:
-            job.salary, job.enrichment_source = posted_salary, "job posting"
+    # --- Step 2: web fills only the gaps ---------------------------------
+    need_salary = not job.salary
+    need_reviews = not (job.work_culture or job.pros or job.cons)
+    if use_llm and (need_salary or need_reviews):
+        queries = (_salary_queries(job) if need_salary else []) + \
+                  (_culture_queries(job) if need_reviews else [])
+        results = await asyncio.gather(
+            *(_search_snippets(context, q) for q in queries), return_exceptions=True,
+        )
+        snippets = "\n".join(s for s in results if isinstance(s, str) and s.strip())
+        if snippets.strip():
+            web = _llm_json_retry(
+                _WEB_SYS,
+                f"Role: {job.title}\nLocation: {job.location or 'unknown'}\n"
+                f"Company: {job.company}\n"
+                f"Web snippets:\n{snippets[:4500]}\n\n{_WEB_INSTRUCTIONS}",
+                max_tokens=600,
+            )
+            if web:
+                if need_salary and web.get("salary"):
+                    job.salary = web["salary"]
+                    src = job.enrichment_source
+                    job.enrichment_source = "web (role salary avg)" if not src else src
+                job.work_culture = job.work_culture or web.get("work_culture")
+                job.pros = job.pros or web.get("pros")
+                job.cons = job.cons or web.get("cons")
+
+    if not job.salary and not use_llm:                  # no-LLM: regex JD then web
+        posted = salary_in_text(job.description)
+        if posted:
+            job.salary, job.enrichment_source = posted, "LinkedIn job description"
         else:
-            hit = salary_in_text(snippets)
+            snips = await asyncio.gather(
+                *(_search_snippets(context, q) for q in _salary_queries(job)),
+                return_exceptions=True,
+            )
+            hit = salary_in_text("\n".join(s for s in snips if isinstance(s, str)))
             if hit:
                 job.salary, job.enrichment_source = f"est. {hit}", "web research"
-        job.enriched = True
 
+    job.enriched = True
     return job
 
 

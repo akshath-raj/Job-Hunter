@@ -73,9 +73,10 @@ It runs two ways from one codebase:
   **green** = eligible; **yellow** = you can apply but it misses a soft
   preference (salary below expectation, culture); **red** = strictly can't apply
   (qualifications, location, seniority, deal-breaker). Colored in the sheet.
-- **Salary by role, averaged** — salary is researched for the *role in that
-  location* across many postings (Glassdoor/AmbitionBox/Levels.fyi) and averaged
-  — not scraped from the one posting.
+- **JD-first enrichment** — qualifications and salary come from the LinkedIn job
+  description first; only if the JD omits pay does it web-research the *average*
+  salary for that role+location across many postings (Glassdoor/AmbitionBox/
+  Levels.fyi). Company culture/pros/cons come from employee reviews.
 - **Rich spreadsheet** — every search writes a `jobs.xlsx` with salary (currency
   labelled), company culture, pros/cons from employee reviews, job description,
   days since posted, applicant count, qualifications, and link.
