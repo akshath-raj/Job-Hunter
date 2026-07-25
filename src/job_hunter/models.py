@@ -149,6 +149,7 @@ class Job(BaseModel):
     num_applicants: str | None = None   # e.g. "47 applicants" / "Over 200 applicants"
 
     # Enrichment (filled by a research agent / web search for the Excel export):
+    jd_summary: str | None = None       # agent summary of the role (not the raw JD)
     about: str | None = None            # what the company does
     salary: str | None = None           # pay range WITH currency/country
     qualifications: str | None = None   # key required quals, summarized

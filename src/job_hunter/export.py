@@ -22,14 +22,14 @@ _COLUMNS = [
     ("pros", "Pros (reviews)", 36),
     ("cons", "Cons (reviews)", 36),
     ("qualifications", "Qualifications", 40),
-    ("description", "Job description", 60),
+    ("jd_summary", "Job summary", 55),
     ("status", "Applied?", 11),
     ("url", "Link", 38),
     ("enrichment_source", "Source", 26),
 ]
 
 # Columns to truncate so the sheet stays readable.
-_TRUNCATE = {"description": 800}
+_TRUNCATE = {"jd_summary": 700}
 
 # RAG cell colors.
 _RAG_FILL = {"green": "C6EFCE", "yellow": "FFEB9C", "red": "FFC7CE"}

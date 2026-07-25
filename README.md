@@ -77,6 +77,9 @@ It runs two ways from one codebase:
   description first; only if the JD omits pay does it web-research the *average*
   salary for that role+location across many postings (Glassdoor/AmbitionBox/
   Levels.fyi). Company culture/pros/cons come from employee reviews.
+- **Agent-summarized JDs** — the sheet shows a concise agent-written summary of
+  each role, not the raw wall-of-text description (the full JD stays in the DB
+  for the eligibility agent to reason over).
 - **Rich spreadsheet** — every search writes a `jobs.xlsx` with salary (currency
   labelled), company culture, pros/cons from employee reviews, job description,
   days since posted, applicant count, qualifications, and link.

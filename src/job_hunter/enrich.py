@@ -46,6 +46,9 @@ _JD_SYS = (
 )
 _JD_INSTRUCTIONS = """Return ONLY JSON:
 {
+  "summary": string,         // 2-4 sentence summary of the ROLE in your own words: what
+                             // you'd actually do, key responsibilities, and what they want.
+                             // Concise and skimmable — do NOT copy the posting verbatim.
   "about": string,           // what the company/team does, from the posting (1-2 sentences)
   "qualifications": string,  // required qualifications, summarized from the posting
   "salary": string           // pay WITH currency ONLY if the posting states it; else ""
@@ -213,6 +216,7 @@ async def enrich_with_browser(context, job: Job, profile=None, use_llm: bool = T
             max_tokens=500,
         )
         if jd:
+            job.jd_summary = jd.get("summary") or job.jd_summary
             job.about = jd.get("about") or job.about
             job.qualifications = jd.get("qualifications") or job.qualifications
             if jd.get("salary"):

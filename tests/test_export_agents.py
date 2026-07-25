@@ -43,17 +43,17 @@ def test_to_excel_writes_rows_and_new_columns(make_job, tmp_path):
     ws = wb.active
     headers = [c.value for c in ws[1]]
     for h in ["Posted", "Applicants", "Work culture", "Pros (reviews)",
-              "Cons (reviews)", "Job description"]:
+              "Cons (reviews)", "Job summary"]:
         assert h in headers
     assert ws.max_row == 3
     values = [c.value for c in ws[2]]
     assert "2 weeks ago" in values and "₹18-24 LPA (INR)" in values
 
 
-def test_description_is_truncated(make_job, tmp_path):
+def test_summary_is_truncated(make_job, tmp_path):
     job = make_job("Engineer")
-    job.description = "x" * 2000
+    job.jd_summary = "x" * 2000
     out = export.to_excel([job], tmp_path / "j.xlsx")
     ws = load_workbook(out).active
-    desc_col = [c.value for c in ws[1]].index("Job description") + 1
-    assert len(ws.cell(row=2, column=desc_col).value) <= 801   # 800 + ellipsis
+    col = [c.value for c in ws[1]].index("Job summary") + 1
+    assert len(ws.cell(row=2, column=col).value) <= 701   # 700 + ellipsis
