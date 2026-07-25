@@ -41,22 +41,14 @@ def _openai_complete(model: str, system: str, user: str, max_tokens: int) -> str
     from openai import OpenAI
 
     client = OpenAI(api_key=config.openai_key())
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user},
-    ]
-    # Newer models (gpt-5, o-series) require `max_completion_tokens`; older ones
-    # (gpt-4o, gpt-4) accept it too. Fall back to `max_tokens` only if rejected.
-    try:
-        resp = client.chat.completions.create(
-            model=model, messages=messages, max_completion_tokens=max_tokens,
-        )
-    except Exception as e:  # noqa: BLE001
-        if "max_completion_tokens" not in str(e) and "max_tokens" not in str(e):
-            raise
-        resp = client.chat.completions.create(
-            model=model, messages=messages, max_tokens=max_tokens,
-        )
+    resp = client.chat.completions.create(
+        model=model,
+        max_tokens=max_tokens,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    )
     return resp.choices[0].message.content or ""
 
 
