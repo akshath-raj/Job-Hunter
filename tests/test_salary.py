@@ -7,10 +7,24 @@ import pytest
 from job_hunter import enrich
 
 
+def test_is_intern_detection(make_job):
+    assert enrich.is_intern(make_job("Machine Learning Intern"))
+    assert enrich.is_intern(make_job("Data Science Internship"))
+    assert not enrich.is_intern(make_job("Machine Learning Engineer"))
+
+
+def test_intern_salary_queries_are_monthly_stipend(make_job):
+    job = make_job("Data Science Intern")
+    job.location = "Bengaluru"
+    qs = enrich._salary_queries(job)
+    assert all("stipend" in q for q in qs)      # interns -> monthly stipend, not LPA
+
+
 @pytest.mark.parametrize("text,expected_substr", [
     ("Base salary is $120,000 - $150,000 per year", "$120,000"),
     ("Compensation: 20 LPA plus benefits", "20 LPA"),
     ("We offer ₹15,00,000 to ₹25,00,000", "₹15,00,000"),
+    ("Stipend: ₹25,000/month", "₹25,000/month"),
     ("Great team, no pay listed", None),
 ])
 def test_salary_in_text(text, expected_substr):

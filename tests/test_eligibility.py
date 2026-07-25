@@ -65,3 +65,28 @@ def test_yellow_on_salary_below_expectation(make_job):
     rag, flags = eligibility.classify(job, p, use_llm=False)
     assert rag == "yellow"                      # eligible, but salary is a soft concern
     assert any("below your expectation" in f for f in flags)
+
+
+def test_no_yellow_when_salary_above_expectation(make_job):
+    p = _student()
+    profile_mod.remember(p, "expected salary", "20 LPA")
+    job = make_job("Machine Learning Intern")
+    job.location = "Bengaluru"
+    job.workplace_type = "Remote"
+    job.salary = "est. ₹33 LPA (INR), range ₹14 - 40 LPA"   # pays MORE than expected
+    rag, flags = eligibility.classify(job, p, use_llm=False)
+    assert rag == "green"                        # higher pay is NOT a concern
+    assert flags == []
+
+
+def test_red_job_shows_only_hard_reasons(make_job):
+    p = _student()
+    profile_mod.remember(p, "expected salary", "20 LPA")
+    job = make_job("Staff Machine Learning Engineer")   # seniority = hard red
+    job.location = "Bengaluru"
+    job.workplace_type = "Remote"
+    job.salary = "avg ₹8 LPA (INR)"                     # would be a soft flag, but moot
+    rag, flags = eligibility.classify(job, p, use_llm=False)
+    assert rag == "red"
+    assert any("level" in f for f in flags)
+    assert not any("salary" in f.lower() for f in flags)  # no soft clutter on a red job

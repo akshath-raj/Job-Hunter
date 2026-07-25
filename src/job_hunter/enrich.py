@@ -27,10 +27,16 @@ from .models import Job
 SALARY_RE = re.compile(
     r"(?:₹|Rs\.?|\$|€|£)\s?[\d,]+(?:\.\d+)?"
     r"(?:\s?(?:-|–|to)\s?(?:₹|Rs\.?|\$|€|£)?\s?[\d,]+(?:\.\d+)?)?"
-    r"(?:\s?(?:LPA|lpa|per year|per annum|/yr|a year|k))?"
+    r"(?:\s?(?:LPA|lpa|per year|per annum|/yr|a year|k|"
+    r"per month|/month|/mo|a month|monthly|pm))?"
     r"|[\d.]+\s?(?:-|–|to)?\s?[\d.]*\s?(?:LPA|lpa|lakhs?)\b",
     re.IGNORECASE,
 )
+
+
+def is_intern(job: Job) -> bool:
+    t = (job.title or "").lower()
+    return any(w in t for w in ("intern", "internship", "trainee", "co-op", "apprentice"))
 
 # Step 1 — extract from the LinkedIn job description FIRST (source of truth).
 _JD_SYS = (
@@ -163,12 +169,26 @@ def _llm_json_retry(system: str, prompt: str, max_tokens: int, attempts: int = 2
 
 
 def _salary_queries(job: Job) -> list[str]:
-    """ROLE + LOCATION salary queries — average many people's posts, not this one."""
+    """ROLE + LOCATION salary queries — average many people's posts, not this one.
+    Interns are paid a MONTHLY stipend, so query for that."""
     role, loc = job.title, (job.location or "")
+    if is_intern(job):
+        return [
+            f"{role} intern stipend per month {loc}",
+            f"{role} internship stipend {loc} glassdoor ambitionbox",
+        ]
     return [
         f"{role} average salary {loc} glassdoor",
         f"{role} salary {loc} ambitionbox payscale levels.fyi",
     ]
+
+
+def _pay_unit_hint(job: Job) -> str:
+    return (
+        "This is an INTERNSHIP — pay is a MONTHLY stipend. Report it PER MONTH "
+        "(e.g. '₹25,000/month' or 'avg ₹30k/month'), NEVER per year/LPA.\n"
+        if is_intern(job) else ""
+    )
 
 
 def _culture_queries(job: Job) -> list[str]:
@@ -188,6 +208,7 @@ async def enrich_with_browser(context, job: Job, profile=None, use_llm: bool = T
         jd = _llm_json_retry(
             _JD_SYS,
             f"Job: {job.title} at {job.company}\nLocation: {job.location or 'n/a'}\n"
+            f"{_pay_unit_hint(job)}"
             f"Posting:\n{job.description[:3000]}\n\n{_JD_INSTRUCTIONS}",
             max_tokens=500,
         )
@@ -216,7 +237,7 @@ async def enrich_with_browser(context, job: Job, profile=None, use_llm: bool = T
             web = _llm_json_retry(
                 _WEB_SYS,
                 f"Role: {job.title}\nLocation: {job.location or 'unknown'}\n"
-                f"Company: {job.company}\n"
+                f"Company: {job.company}\n{_pay_unit_hint(job)}"
                 f"Web snippets:\n{snippets[:4500]}\n\n{_WEB_INSTRUCTIONS}",
                 max_tokens=600,
             )
