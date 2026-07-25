@@ -132,16 +132,51 @@ async def scrape_search(
     return list(jobs.values())[:max_results]
 
 
+_DESC_SELECTORS = (
+    "#job-details, "
+    ".jobs-description__content, .jobs-description-content__text, "
+    ".jobs-box__html-content, article.jobs-description__container, "
+    ".show-more-less-html__markup, .description__text"
+)
+
+
 async def fetch_details(s: Session, job: Job) -> Job:
     """Open a job page and fill in description, workplace type, Easy Apply flag."""
     await s.page.goto(job.url, wait_until="domcontentloaded")
     await human_pause(1.2, 2.5)
 
-    desc_el = await s.page.query_selector(
-        "div.jobs-description__content, article.jobs-description__container, #job-details"
-    )
+    # Wait for the description to render (it lazy-loads after the shell).
+    try:
+        await s.page.wait_for_selector(_DESC_SELECTORS, timeout=8000)
+    except Exception:  # noqa: BLE001 — proceed with whatever is there
+        pass
+
+    # Expand the collapsed "…see more" so we capture the FULL description.
+    for sel in (
+        "button.jobs-description__footer-button",
+        "button.show-more-less-html__button--more",
+        "button[aria-label*='see more' i]",
+        "button:has-text('See more')",
+        "button:has-text('Show more')",
+    ):
+        btn = await s.page.query_selector(sel)
+        if btn and await btn.is_visible():
+            try:
+                await btn.click()
+                await human_pause(0.3, 0.7)
+                break
+            except Exception:  # noqa: BLE001
+                pass
+
+    desc_el = await s.page.query_selector(_DESC_SELECTORS)
     if desc_el:
-        job.description = (await desc_el.inner_text()).strip()[:8000]
+        text = (await desc_el.inner_text()).strip()
+        if text:
+            job.description = text[:8000]
+    if not job.description:  # last resort: the main job pane
+        main = await s.page.query_selector("main, .jobs-details__main-content")
+        if main:
+            job.description = (await main.inner_text()).strip()[:8000] or None
 
     # Easy Apply detection.
     apply_btn = await s.page.query_selector("button.jobs-apply-button")
