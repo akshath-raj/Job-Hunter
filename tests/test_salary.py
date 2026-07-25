@@ -44,6 +44,28 @@ async def test_salary_queries_are_role_and_location_based(make_job):
     assert any("average salary" in q for q in qs)
 
 
+async def test_market_estimate_fallback(monkeypatch, make_job):
+    # JD has no salary and web returns none -> a labelled market estimate fills it.
+    def fake_json(system, prompt, max_tokens):
+        if "LinkedIn job posting" in system:
+            return {"summary": "role", "about": "co", "qualifications": "py", "salary": ""}
+        if "compensation expert" in system:            # the estimate step
+            return {"salary": "est. market ₹10-15 LPA (INR)"}
+        return {"salary": "", "work_culture": "ok"}     # web step: no salary
+
+    async def some_snips(context, query):
+        return "glassdoor reviews: decent culture"
+
+    monkeypatch.setattr("job_hunter.llm.complete_json", fake_json)
+    monkeypatch.setattr(enrich, "_search_snippets", some_snips)
+    job = make_job("ML Engineer")
+    job.location = "Bengaluru"
+    job.description = "We need Python. No pay listed."
+    await enrich.enrich_with_browser(context=object(), job=job, use_llm=True)
+    assert job.salary and "market" in job.salary
+    assert job.enrichment_source == "LLM market estimate"
+
+
 async def test_jd_salary_takes_priority(monkeypatch, make_job):
     # Salary in the JD must be used; the web must NOT be consulted.
     job = make_job("Backend Engineer")

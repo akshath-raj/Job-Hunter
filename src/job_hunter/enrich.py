@@ -267,6 +267,22 @@ async def enrich_with_browser(context, job: Job, profile=None, use_llm: bool = T
             if hit:
                 job.salary, job.enrichment_source = f"est. {hit}", "web research"
 
+    # Final fallback: neither the JD nor the web gave a salary. Rather than leave
+    # it blank, give a clearly-labelled market estimate for the role+location.
+    if use_llm and not job.salary:
+        est = _llm_json_retry(
+            "You are a compensation expert. Give a realistic MARKET salary range "
+            "for this role in this location from your general knowledge. This is a "
+            "market estimate, not a specific company's figure. Be reasonable.",
+            f"Role: {job.title}\nLocation: {job.location or 'unknown'}\n{_pay_unit_hint(job)}"
+            'Return {"salary": string} — a range WITH currency prefixed "est. market". '
+            'If you genuinely cannot estimate, return {"salary": ""}.',
+            max_tokens=120,
+        )
+        if est and est.get("salary"):
+            job.salary = est["salary"]
+            job.enrichment_source = job.enrichment_source or "LLM market estimate"
+
     job.enriched = True
     return job
 
