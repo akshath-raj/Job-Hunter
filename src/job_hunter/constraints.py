@@ -37,22 +37,33 @@ def _rank(s: Seniority) -> int:
     return SENIORITY_ORDER.index(s)
 
 
+def dealbreaker_hit(job: Job, exclude_keywords: list[str]) -> str | None:
+    """Return the deal-breaker keyword if the job's TITLE or COMPANY matches it
+    (whole-word). We deliberately do NOT scan the JD body — an ML posting that
+    merely mentions 'software engineers' must not be excluded by 'Software
+    Engineer'."""
+    hay = f" {job.title.lower()} {job.company.lower()} "
+    for kw in exclude_keywords:
+        k = kw.lower().strip()
+        if k and re.search(rf"(?<![a-z0-9]){re.escape(k)}(?![a-z0-9])", hay):
+            return kw
+    return None
+
+
 def check(job: Job, profile: Profile) -> tuple[bool, str | None]:
     """Return (eligible, reason_if_not)."""
     c: Constraints = profile.constraints
-    title = job.title.lower()
     desc = (job.description or "").lower()
-    blob = f"{title}\n{desc}\n{job.company.lower()}"
 
     # 1. Excluded companies.
     for company in c.exclude_companies:
         if company.lower() in job.company.lower():
             return False, f"excluded company ({company})"
 
-    # 2. Excluded keywords (e.g. "requires PhD", "security clearance").
-    for kw in c.exclude_keywords:
-        if kw.lower() in blob:
-            return False, f"contains excluded keyword ({kw})"
+    # 2. Deal-breaker keywords — matched on title/company only (not JD body).
+    hit = dealbreaker_hit(job, c.exclude_keywords)
+    if hit:
+        return False, f"deal-breaker '{hit}'"
 
     # 3. Seniority ceiling — the core student-safety rule.
     ok, reason = seniority_ok(job, profile)
@@ -109,7 +120,11 @@ def location_ok(job: Job, profile: Profile) -> tuple[bool, str | None]:
     wp = (job.workplace_type or "").lower()
     loc_hay = f"{(job.location or '').lower()} {wp}"
     wtypes = [w.lower() for w in c.workplace_types]
-    remote_ok = "remote" in wtypes or any(_expand_location(loc) & {"remote"} for loc in c.locations)
+    # Remote is acceptable if the user set no work-style constraint (any), listed
+    # remote as a style, or listed remote/anywhere as a location.
+    remote_ok = (not wtypes) or "remote" in wtypes or any(
+        _expand_location(loc) & {"remote"} for loc in c.locations
+    )
     if "remote" in loc_hay and remote_ok:
         return True, None
     for loc in c.locations:

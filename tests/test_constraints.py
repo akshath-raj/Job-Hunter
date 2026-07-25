@@ -46,10 +46,19 @@ def test_excluded_company_blocks(student, make_job):
 
 
 def test_excluded_keyword_blocks(student, make_job):
-    student.constraints.exclude_keywords = ["security clearance"]
-    job = make_job("Backend Engineer Intern", description="Requires an active security clearance.")
+    # Deal-breakers match the TITLE/company, not the JD body (avoids false
+    # positives like "Software Engineer" appearing in an ML posting's text).
+    student.constraints.exclude_keywords = ["crypto"]
+    job = make_job("Crypto Trading Engineer", description="Great team.")
     ok, reason = constraints.check(job, student)
-    assert not ok and "excluded keyword" in reason
+    assert not ok and "deal-breaker" in reason
+
+
+def test_excluded_keyword_ignores_jd_body(student, make_job):
+    student.constraints.exclude_keywords = ["Software Engineer"]
+    job = make_job("Machine Learning Intern", description="Work with software engineers.")
+    ok, _ = constraints.check(job, student)
+    assert ok            # ML Intern is NOT excluded just because the JD mentions SWEs
 
 
 def test_remote_only_blocks_onsite(student, make_job):

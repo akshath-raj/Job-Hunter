@@ -70,10 +70,9 @@ def classify(job: Job, profile: Profile, use_llm: bool = True) -> tuple[str, lis
     for company in c.exclude_companies:
         if company.lower() in job.company.lower():
             hard.append(f"excluded company ({company})")
-    blob = f"{job.title} {job.description or ''} {job.about or ''}".lower()
-    for kw in c.exclude_keywords:
-        if kw.lower() in blob:
-            hard.append(f"deal-breaker '{kw}'")
+    hit = constraints.dealbreaker_hit(job, c.exclude_keywords)
+    if hit:
+        hard.append(f"deal-breaker '{hit}'")
     ok, reason = constraints.seniority_ok(job, profile)
     if not ok:
         hard.append(reason)

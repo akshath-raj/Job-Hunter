@@ -46,10 +46,9 @@ def test_red_on_seniority(make_job):
 def test_red_on_dealbreaker(make_job):
     p = _student()
     p.constraints.exclude_keywords = ["crypto"]
-    job = make_job("ML Intern")
+    job = make_job("Crypto ML Intern")           # deal-breaker in the TITLE
     job.location = "Bengaluru"
     job.workplace_type = "Remote"
-    job.description = "Join our crypto trading team."
     rag, flags = eligibility.classify(job, p, use_llm=False)
     assert rag == "red"
     assert any("crypto" in f for f in flags)
