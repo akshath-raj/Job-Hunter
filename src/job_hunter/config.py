@@ -63,7 +63,10 @@ def ensure_dirs() -> None:
 #   3. default to anthropic
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-6",
-    "openai": "gpt-4o",
+    # gpt-4o-mini is the sweet spot for this tool: fast, cheap, reliable JSON.
+    # Avoid reasoning models (gpt-5/o-series) here — they burn the token budget
+    # thinking and return thin/empty JSON for these extraction tasks.
+    "openai": "gpt-4o-mini",
 }
 
 

@@ -160,7 +160,9 @@ Edit `.env`. Only a provider key is required, and only for standalone runs
 | `JOBHUNTER_CDP_URL` | no | Attach to a running Chrome instead of launching one ([details](#-reusing-your-existing-chrome-login)) |
 
 **Provider selection:** set either key. If you set both, Anthropic wins unless
-`JOBHUNTER_PROVIDER=openai`. Defaults: `claude-sonnet-4-6` / `gpt-4o`.
+`JOBHUNTER_PROVIDER=openai`. Defaults: `claude-sonnet-4-6` / `gpt-4o-mini`.
+(Avoid reasoning models like gpt-5/o-series here — they return thin JSON for
+these extraction tasks.)
 
 ```env
 # Minimal .env for standalone use with OpenAI:
